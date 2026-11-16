@@ -108,3 +108,5 @@ def test_model_is_told_when_answers_complete_the_qualification(profile: Business
     assert "booking link is added to your message automatically" in result["instructions"]
     # The link is how they book, so the agent must not also promise a call.
     assert "don't say anyone will contact them" in result["instructions"]
+    # The link is added by code, so the model must not talk about it.
+    assert "Don't mention the link" in result["instructions"]

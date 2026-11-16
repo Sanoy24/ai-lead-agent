@@ -54,6 +54,24 @@ _STATUS_FOR_OUTCOME = {
 _FINAL_STATUSES = {LeadStatus.BOOKED, LeadStatus.LOST, LeadStatus.OPTED_OUT}
 
 
+_LINK_TALK = re.compile(
+    r"\b(booking link|link below|link above|added automatically|automatically added)\b", re.I
+)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_LINK_TALK_FALLBACK = "Thanks so much for sharing all that!"
+
+
+def without_link_talk(text: str) -> str:
+    """Drop sentences where the model talks about the booking link.
+
+    The link is added by code right after the model's message, and smaller
+    models tend to announce it ("the booking link will be added automatically"),
+    which reads oddly. Removing those sentences works the same for every model.
+    """
+    kept = [s for s in _SENTENCE_END.split(text.strip()) if s and not _LINK_TALK.search(s)]
+    return " ".join(kept) or _LINK_TALK_FALLBACK
+
+
 class OptedOutError(RuntimeError):
     """The lead opted out, so nothing more may be sent to them."""
 
@@ -380,7 +398,7 @@ class LeadResponder:
                     if outcome is Outcome.QUALIFIED
                     else "Whenever you're ready, you can book a free assessment here"
                 )
-                text = f"{text}\n\n{lead_in}: {link}"
+                text = f"{without_link_talk(text)}\n\n{lead_in}: {link}"
             elif outcome is Outcome.QUALIFIED:
                 text = f"{text}\n\nA specialist will reach out shortly to schedule your assessment."
         return text

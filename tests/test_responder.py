@@ -14,6 +14,7 @@ from lead_agent.responder import (
     OPT_OUT_CONFIRMATION,
     LeadResponder,
     is_opt_out,
+    without_link_talk,
 )
 
 
@@ -255,3 +256,20 @@ def test_background_scheduling_runs_the_reply(
     responder.schedule_first_reply(lead_id).result(timeout=5)
     responder.shutdown()
     assert channel.sent == [("dana@example.com", "Hi Dana!")]
+
+
+@pytest.mark.parametrize(
+    ("model_text", "expected"),
+    [
+        (
+            "Thanks for sharing those details. We'll schedule the free assessment using the "
+            "booking link that will be added automatically. Let me know if you have questions.",
+            "Thanks for sharing those details. Let me know if you have questions.",
+        ),
+        ("Great! Pick a time with the link below.", "Great!"),
+        ("A booking link is added automatically.", "Thanks so much for sharing all that!"),
+        ("Perfect, thanks Dana!", "Perfect, thanks Dana!"),
+    ],
+)
+def test_model_talk_about_the_booking_link_is_removed(model_text: str, expected: str) -> None:
+    assert without_link_talk(model_text) == expected
