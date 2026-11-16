@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, ForeignKey, Index, String, Text, create_engine, event
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -93,6 +93,9 @@ class Lead(Base):
     appointment_at: Mapped[datetime | None] = mapped_column(default=None)
     booking_uid: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     crm_contact_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    crm_synced_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
+    crm_synced_event_id: Mapped[int] = mapped_column(default=0)
+    """The last event already written to the CRM as a note."""
 
     messages: Mapped[list[LeadMessage]] = relationship(
         back_populates="lead", order_by="LeadMessage.id", cascade="all, delete-orphan"
@@ -153,6 +156,39 @@ def _configure_sqlite(dbapi_connection: Any, _record: Any) -> None:
     cursor.close()
 
 
+def _add_missing_columns(engine: Engine) -> None:
+    """Add columns introduced after a database was created.
+
+    ``create_all`` only creates missing tables. New columns are nullable or have
+    a scalar default, so adding them in place is safe. Use a migration tool such
+    as Alembic once changes go beyond adding columns.
+    """
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                ddl = column.type.compile(dialect=engine.dialect)
+                default = getattr(column.default, "arg", None)
+                if isinstance(default, bool):
+                    ddl += f" DEFAULT {int(default)}"
+                elif isinstance(default, int):
+                    ddl += f" DEFAULT {default}"
+                if not column.nullable and isinstance(default, int):
+                    ddl += " NOT NULL"
+                connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl}"))
+                if column.index:
+                    connection.execute(
+                        text(
+                            f"CREATE INDEX IF NOT EXISTS ix_{table.name}_{column.name} "
+                            f"ON {table.name} ({column.name})"
+                        )
+                    )
+
+
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
     return sessionmaker(engine, expire_on_commit=False)

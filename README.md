@@ -15,7 +15,7 @@ Most leads go to whichever business answers first. A form filled in at 9 pm usua
 - **Qualifies by conversation:** asks your questions (budget, timeline, property, location), records the answers and scores the lead.
 - **Books qualified leads** with a booking link and updates the lead when they book.
 - **Follows up automatically** when a lead goes quiet, and stops the moment they reply, book or opt out.
-- **Syncs to your CRM** (HubSpot) and shows your pipeline, response times and every conversation in a dashboard, where a person can take over at any time.
+- **Syncs to your CRM** (HubSpot, free tier) and shows your pipeline, response times and every conversation in a dashboard, where a person can take over at any time.
 
 ## How qualification works
 
@@ -36,6 +36,10 @@ Set `ADMIN_PASSWORD` and sign in at `/admin` to see:
 - **Lead detail**: the full conversation across email and Telegram, the recorded answers and score, upcoming follow-ups, the consent wording, and an activity log. **Take over** pauses the AI so a person can reply from the dashboard; **Hand back to AI** resumes it.
 
 The same server also hosts a demo landing page for the fictional business at `/`, with the lead form the agent replies to.
+
+## HubSpot
+
+Set `HUBSPOT_ACCESS_TOKEN` (a private app token from the free HubSpot CRM) and every lead becomes a HubSpot contact within half a minute. Contacts are matched by email, so existing ones are updated rather than duplicated. HubSpot's **Lead status** follows the pipeline (new, in progress, connected, open deal, bad timing, unqualified). Key moments are added as notes on the contact, with a link back to the conversation: the enquiry, status changes with the recorded answers and score, bookings, handoffs and opt-outs. Sync runs in the background, never delays a reply to a lead, and catches up after a HubSpot outage.
 
 ## Running it locally
 

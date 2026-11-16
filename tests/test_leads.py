@@ -1,12 +1,13 @@
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from lead_agent.db import Lead, LeadSource, LeadStatus, utcnow
+from lead_agent.db import Lead, LeadSource, LeadStatus, make_engine, make_session_factory, utcnow
 from lead_agent.leads import LeadIntake, LeadService
 from tests.conftest import CONSENT
 
@@ -98,3 +99,24 @@ def test_invalid_intake_is_rejected(overrides: dict[str, Any], message: str) -> 
 def test_unknown_timezone_is_ignored() -> None:
     assert intake(timezone="Mars/Olympus").timezone is None
     assert intake(timezone="America/Denver").timezone == "America/Denver"
+
+
+def test_columns_added_in_later_versions_are_added_to_old_databases(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    engine = make_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE leads (id VARCHAR(32) PRIMARY KEY, created_at DATETIME, "
+                "updated_at DATETIME, source VARCHAR(16), name VARCHAR(120))"
+            )
+        )
+        connection.execute(text("INSERT INTO leads (id, source, name) VALUES ('a', 'form', 'Old')"))
+
+    sessions = make_session_factory(engine)
+
+    with sessions() as session:
+        lead = session.get_one(Lead, "a")
+        assert lead.crm_synced_event_id == 0
+        assert lead.booking_uid is None
+        assert lead.follow_ups_sent == 0

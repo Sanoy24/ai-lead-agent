@@ -105,6 +105,7 @@ export interface LeadEvent {
 }
 
 export interface LeadDetail extends LeadSummary {
+  crm_url: string | null;
   telegram_chat_id: string | null;
   timezone: string | null;
   answers: Record<string, unknown>;

@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Bot,
   CalendarClock,
+  ExternalLink,
   Hand,
   Mail,
   MessageCircle,
@@ -139,6 +140,18 @@ export function LeadDetail() {
               )}
               {data.telegram_chat_id && (
                 <Row icon={<MessageCircle className="size-4" />}>Telegram chat</Row>
+              )}
+              {data.crm_url && (
+                <Row icon={<ExternalLink className="size-4" />}>
+                  <a
+                    href={data.crm_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:underline"
+                  >
+                    Open in HubSpot
+                  </a>
+                </Row>
               )}
               {data.appointment_at && (
                 <Row icon={<CalendarClock className="size-4" />}>

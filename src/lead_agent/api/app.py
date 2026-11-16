@@ -36,6 +36,7 @@ from lead_agent.channels.email import (
 )
 from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
+from lead_agent.crm.hubspot import HubSpotClient, HubSpotSync
 from lead_agent.db import LeadSource, make_engine, make_session_factory
 from lead_agent.followups import FollowUpScheduler
 from lead_agent.leads import IntakeResult, LeadIntake, LeadService
@@ -138,6 +139,13 @@ def build_services(settings: Settings) -> Services:
         )
         services.workers["telegram"] = bot.run_polling
         services.cleanup.append(telegram_client.close)
+
+    if settings.hubspot_access_token is not None:
+        hubspot = HubSpotClient(settings.hubspot_access_token.get_secret_value())
+        crm = HubSpotSync(sessions, hubspot, dashboard_url=settings.public_url)
+        crm_interval = settings.hubspot_sync_seconds
+        services.workers["hubspot"] = lambda stop: crm.run_polling(stop, crm_interval)
+        services.cleanup.append(hubspot.close)
 
     if settings.imap_host:
         mailbox = ImapMailbox(
