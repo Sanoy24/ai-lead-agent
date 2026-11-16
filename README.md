@@ -23,6 +23,7 @@ Most leads go to whichever business answers first. A form filled in at 9 pm usua
 - **Speed-to-lead at a glance.** Median and 90th-percentile time to first reply, the share of leads answered within a minute, bookings and the full pipeline.
 - **Every conversation in one place**, across email and Telegram, with the recorded answers, score, appointment, follow-up schedule and an activity log.
 - **Take over at any time.** One click pauses the AI so a person can reply from the dashboard; hand it back when you're done. The agent also hands over by itself when someone is upset, reports an emergency or asks for a person.
+- **Bring old leads back.** Upload a CSV of past leads or customers and the agent sends each a short, personal opener (outside quiet hours). Replies continue as normal conversations, and the Campaigns page shows who replied and booked. Anyone who ever opted out is skipped automatically.
 - **Your CRM stays current.** Leads become HubSpot contacts with their lead status kept in step, and key moments are added as notes.
 
 <table>

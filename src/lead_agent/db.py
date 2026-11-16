@@ -45,6 +45,7 @@ class LeadSource(StrEnum):
     WEBHOOK = "webhook"
     TELEGRAM = "telegram"
     SMS = "sms"
+    REACTIVATION = "reactivation"
 
 
 class Direction(StrEnum):
@@ -88,6 +89,8 @@ class Lead(Base):
     last_outbound_at: Mapped[datetime | None] = mapped_column(default=None)
     next_follow_up_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
     follow_ups_sent: Mapped[int] = mapped_column(default=0)
+    outreach_pending: Mapped[bool] = mapped_column(default=False)
+    """True while an imported contact waits for the agent's first message."""
     ai_paused: Mapped[bool] = mapped_column(default=False)
     """True when a person has taken over the conversation."""
     opted_out_at: Mapped[datetime | None] = mapped_column(default=None)

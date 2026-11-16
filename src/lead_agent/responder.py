@@ -16,7 +16,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from lead_agent.agent import AgentTurn, QualifyingAgent
 from lead_agent.channels import Channel, LogChannel, Recipient, SendError
-from lead_agent.db import Direction, Lead, LeadEvent, LeadMessage, LeadStatus, utcnow
+from lead_agent.db import (
+    Direction,
+    Lead,
+    LeadEvent,
+    LeadMessage,
+    LeadSource,
+    LeadStatus,
+    utcnow,
+)
 from lead_agent.followups import FOLLOW_UP_STATUSES
 from lead_agent.llm import LLMError, Message
 from lead_agent.profile import BusinessProfile
@@ -31,6 +39,10 @@ OPT_OUT_WORDS = frozenset(
 )
 OPT_OUT_CONFIRMATION = "You're unsubscribed and won't hear from us again. Take care!"
 FALLBACK_REPLY = "Thanks for reaching out! A member of our team will get back to you shortly."
+FALLBACK_OPENER = (
+    "Hi {first_name}, it's {agent} from {business}. You got in touch with us {about}a while "
+    "back. Is that still something you're thinking about?"
+)
 FALLBACK_FOLLOW_UP = "Just checking in on your enquiry. Reply here whenever suits you!"
 
 _STATUS_FOR_OUTCOME = {
@@ -226,7 +238,15 @@ class LeadResponder:
         self._send(snapshot.recipient, text, lead_id, record=True)
 
     def follow_up(self, lead_id: str) -> None:
-        """Nudge a lead who hasn't replied. Called by the follow-up scheduler."""
+        """Nudge a lead who hasn't replied. Called by the follow-up scheduler.
+
+        Imported contacts waiting for their first message get an opener instead.
+        """
+        with self._sessions() as session:
+            opener = session.get_one(Lead, lead_id).outreach_pending
+        if opener:
+            self.reach_out(lead_id)
+            return
         with self._sessions() as session:
             lead = session.get_one(Lead, lead_id)
             if (
@@ -280,6 +300,62 @@ class LeadResponder:
                 lead.events.append(LeadEvent(type="follow_ups.finished", detail={}))
 
         self._send(snapshot.recipient, text, lead_id, record=True)
+
+    def reach_out(self, lead_id: str) -> None:
+        """Send the first message to an imported past lead or customer."""
+        with self._sessions() as session:
+            lead = session.get_one(Lead, lead_id)
+            if (
+                not lead.outreach_pending
+                or lead.ai_paused
+                or lead.status not in FOLLOW_UP_STATUSES
+                or not lead.consent
+                or lead.opted_out_at is not None
+            ):
+                return
+            recipient = _recipient(lead)
+            name, service = lead.name, lead.service_interest
+            note = next(
+                (
+                    str(e.detail.get("note") or "") or None
+                    for e in lead.events
+                    if e.type == "lead.created"
+                ),
+                None,
+            )
+
+        try:
+            text = self._agent.reach_out(name, service, note)
+        except LLMError:
+            logger.warning("Agent failed to write an opener for lead %s; using a template", lead_id)
+            text = ""
+        if not text:
+            first_name = name.split()[0] if any(c.isalpha() for c in name) else "there"
+            about = f"about {service.lower()} " if service else ""
+            text = FALLBACK_OPENER.format(
+                first_name=first_name,
+                agent=self._profile.agent_name,
+                business=self._profile.name,
+                about=about,
+            )
+
+        with self._sessions.begin() as session:
+            lead = session.get_one(Lead, lead_id)
+            if not lead.outreach_pending or lead.last_inbound_at is not None:
+                return  # Already sent, or they wrote to us first.
+            lead.outreach_pending = False
+            lead.events.append(LeadEvent(type="reactivation.sent", detail={}))
+            if lead.status == LeadStatus.NEW:
+                lead.events.append(
+                    LeadEvent(
+                        type="lead.status_changed",
+                        detail={"from": lead.status, "to": LeadStatus.CONTACTED},
+                    )
+                )
+                lead.status = LeadStatus.CONTACTED
+            self._schedule_follow_up(lead, sent=0)
+
+        self._send(recipient, text, lead_id, record=True)
 
     # --- Internals -------------------------------------------------------------
 
@@ -343,7 +419,10 @@ class LeadResponder:
             else:
                 history.append(Message("assistant", message.content))
         if not history or history[0].role != "user":
-            intro = f"New enquiry from {lead.name}"
+            if lead.source == LeadSource.REACTIVATION:
+                intro = f"{lead.name}, a past enquiry or customer, was re-contacted by us"
+            else:
+                intro = f"New enquiry from {lead.name}"
             if lead.service_interest:
                 intro += f" about {lead.service_interest}"
             history.insert(0, Message("user", f"[{intro}.]"))
