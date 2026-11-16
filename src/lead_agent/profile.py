@@ -10,6 +10,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, Field, model_validator
 
+from lead_agent.followups import FollowUpPolicy
+
 
 class Question(BaseModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
@@ -58,6 +60,7 @@ class BusinessProfile(BaseModel):
     rules: list[str] = Field(default_factory=list)
     qualify_score: int = Field(default=70, ge=0, le=100)
     questions: list[Question]
+    follow_ups: FollowUpPolicy = Field(default_factory=FollowUpPolicy)
 
     @model_validator(mode="after")
     def _unique_keys(self) -> BusinessProfile:
