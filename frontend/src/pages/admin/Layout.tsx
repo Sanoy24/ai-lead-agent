@@ -1,4 +1,4 @@
-import { ExternalLink, LayoutDashboard, LogOut, Sun, Users } from "lucide-react";
+import { ExternalLink, LayoutDashboard, LogOut, RotateCcw, Sun, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Navigate, NavLink, Outlet, useNavigate } from "react-router";
 
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/admin/leads", label: "Leads", icon: Users, end: false },
+  { to: "/admin/campaigns", label: "Campaigns", icon: RotateCcw, end: false },
 ];
 
 export function AdminLayout() {

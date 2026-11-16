@@ -17,6 +17,12 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from lead_agent.api.auth import COOKIE_NAME, SESSION_SECONDS, SessionSigner, password_matches
 from lead_agent.api.ratelimit import RateLimiter
+from lead_agent.campaigns import (
+    MAX_CONTACTS,
+    CampaignStats,
+    ImportResult,
+    ReactivationService,
+)
 from lead_agent.config import Settings
 from lead_agent.db import Direction, Lead, LeadEvent, LeadMessage, LeadStatus, utcnow
 from lead_agent.responder import LeadResponder, OptedOutError
@@ -109,6 +115,16 @@ class Metrics(BaseModel):
 
 class TeamMessage(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
+
+
+class CampaignUpload(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    consent_confirmed: bool = Field(
+        description="The business confirms everyone on the list previously contacted it or "
+        "bought from it and may be contacted again."
+    )
+    consent_basis: str = Field(default="Past enquiry or customer of the business.", max_length=300)
+    contacts: list[dict[str, Any]] = Field(max_length=MAX_CONTACTS)
 
 
 class StatusChange(BaseModel):
@@ -321,6 +337,23 @@ def build_admin_router(settings: Settings) -> APIRouter:
                     lead.next_follow_up_at = None
         with sessions(request)() as db:
             return _detail(_get(db, lead_id), settings.hubspot_portal_id)
+
+    @private.get("/campaigns")
+    def campaigns(request: Request) -> list[CampaignStats]:
+        """Reactivation campaigns and how each is doing."""
+        return ReactivationService(sessions(request)).stats()
+
+    @private.post("/campaigns", status_code=201)
+    def start_campaign(body: CampaignUpload, request: Request) -> ImportResult:
+        """Import past leads or customers to re-contact. The agent sends each an opener
+        through the follow-up scheduler, outside quiet hours."""
+        if not body.consent_confirmed:
+            raise HTTPException(
+                400, "Confirm that everyone on the list previously contacted or bought from you."
+            )
+        return ReactivationService(sessions(request)).import_contacts(
+            body.name, body.contacts, body.consent_basis.strip()
+        )
 
     def _toggle(request: Request, lead_id: str, *, paused: bool) -> LeadDetail:
         with sessions(request)() as db:

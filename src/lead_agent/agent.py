@@ -171,6 +171,20 @@ class QualifyingAgent:
         ]
         return self._model.complete(messages, []).content.strip()
 
+    def reach_out(self, name: str, service: str | None, note: str | None) -> str:
+        """Write the first message to a past lead or customer the business is re-contacting."""
+        about = f" about {service}" if service else ""
+        context = f" Notes from the business: {note}." if note else ""
+        nudge = (
+            f"[{name} contacted the business{about} some time ago and hasn't heard from us "
+            f"since.{context} Write the first message of a new conversation: one or two short, "
+            "friendly sentences that say who you are and why you're getting in touch, then ask "
+            "one easy question, such as whether it's still something they're thinking about. "
+            "Don't invent details about them or their earlier contact. No pressure.]"
+        )
+        messages = [Message("system", self._system_prompt(name, {})), Message("user", nudge)]
+        return self._model.complete(messages, []).content.strip()
+
     def _run_tool(self, call: ToolCall, turn: AgentTurn) -> dict[str, Any]:
         if call.name == "record_answers":
             saved: dict[str, Any] = {}

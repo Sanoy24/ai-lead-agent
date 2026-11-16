@@ -29,11 +29,14 @@ export const SOURCE: Record<string, string> = {
   form: "Website form",
   webhook: "Webhook",
   telegram: "Telegram",
+  sms: "Text message",
+  reactivation: "Reactivation campaign",
 };
 
 export const CHANNEL: Record<string, string> = {
   email: "Email",
   telegram: "Telegram",
+  sms: "SMS",
   form: "Website form",
   webhook: "Webhook",
   log: "Not sent (log only)",
@@ -54,6 +57,7 @@ const EVENTS: Record<string, string> = {
   "lead.rescheduled": "Rescheduled",
   "lead.booking_cancelled": "Cancelled the booking",
   "follow_up.sent": "Follow-up sent",
+  "reactivation.sent": "Reactivation message sent",
   "follow_ups.finished": "Follow-ups finished",
   "message.failed": "Message not delivered",
   "agent.failed": "AI unavailable, holding reply sent",

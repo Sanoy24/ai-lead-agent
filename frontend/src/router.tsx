@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 
+import { Campaigns } from "@/pages/admin/Campaigns";
 import { AdminLayout } from "@/pages/admin/Layout";
 import { LeadDetail } from "@/pages/admin/LeadDetail";
 import { Leads } from "@/pages/admin/Leads";
@@ -18,6 +19,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Overview /> },
       { path: "leads", element: <Leads /> },
       { path: "leads/:id", element: <LeadDetail /> },
+      { path: "campaigns", element: <Campaigns /> },
     ],
   },
   { path: "*", element: <NotFound /> },

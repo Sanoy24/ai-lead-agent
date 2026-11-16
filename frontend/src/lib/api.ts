@@ -149,6 +149,31 @@ function toQuery(params: LeadQuery): string {
   return text ? `?${text}` : "";
 }
 
+export interface CampaignContact {
+  name: string;
+  email?: string;
+  phone?: string;
+  service_interest?: string;
+  note?: string;
+}
+
+export interface CampaignStats {
+  campaign: string;
+  total: number;
+  waiting: number;
+  contacted: number;
+  replied: number;
+  qualified: number;
+  booked: number;
+  opted_out: number;
+}
+
+export interface ImportResult {
+  campaign: string;
+  queued: number;
+  skipped: { row: number; reason: string }[];
+}
+
 const leadPath = (id: string) => `/api/admin/leads/${encodeURIComponent(id)}`;
 
 export const admin = {
@@ -165,6 +190,17 @@ export const admin = {
     request<LeadDetail>(`${leadPath(id)}/messages`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    }),
+  campaigns: () => request<CampaignStats[]>("/api/admin/campaigns"),
+  startCampaign: (name: string, contacts: CampaignContact[], consentBasis: string) =>
+    request<ImportResult>("/api/admin/campaigns", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        consent_confirmed: true,
+        consent_basis: consentBasis,
+        contacts,
+      }),
     }),
   setStatus: (id: string, status: ManualStatus) =>
     request<LeadDetail>(`${leadPath(id)}/status`, {
