@@ -27,6 +27,10 @@ The language model and plain code each do what they're good at:
 
 Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
 
+## Follow-ups
+
+When a lead stops replying, the agent follows up on the schedule in the business profile (by default 1, 3 and 7 days after its last message). Each follow-up is short, re-asks the open question or offers the booking link again, and the last one says it's the last. Follow-ups are never sent during quiet hours (8 pm to 9 am by default) in the lead's time zone, and a reply restarts the schedule. Booked, opted-out, lost and taken-over leads are never followed up. First replies aren't held for quiet hours, because the lead has just written to you.
+
 ## Booking
 
 Qualified leads get your booking link prefilled with their name and email. Cal.com sends booking events back to `/api/webhooks/calcom` (signed with `CALCOM_WEBHOOK_SECRET`), and the agent marks the lead **booked**, stops following up, and confirms the time in the lead's time zone. Reschedules and cancellations are tracked too. Bookings are matched by a lead id carried in the link, or by the attendee's email.

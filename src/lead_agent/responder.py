@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from lead_agent.agent import AgentTurn, QualifyingAgent
 from lead_agent.channels import Channel, LogChannel, Recipient, SendError
 from lead_agent.db import Direction, Lead, LeadEvent, LeadMessage, LeadStatus, utcnow
+from lead_agent.followups import FOLLOW_UP_STATUSES
 from lead_agent.llm import LLMError, Message
 from lead_agent.profile import BusinessProfile
 from lead_agent.scoring import Outcome, assess
@@ -30,6 +31,7 @@ OPT_OUT_WORDS = frozenset(
 )
 OPT_OUT_CONFIRMATION = "You're unsubscribed and won't hear from us again. Take care!"
 FALLBACK_REPLY = "Thanks for reaching out! A member of our team will get back to you shortly."
+FALLBACK_FOLLOW_UP = "Just checking in on your enquiry. Reply here whenever suits you!"
 
 _STATUS_FOR_OUTCOME = {
     Outcome.QUALIFYING: LeadStatus.QUALIFYING,
@@ -115,6 +117,7 @@ class LeadResponder:
             )
             lead.last_inbound_at = utcnow()
             lead.next_follow_up_at = None  # They replied, so any pending follow-up is moot.
+            lead.follow_ups_sent = 0
             if lead.status == LeadStatus.OPTED_OUT:
                 return
             if is_opt_out(text):
@@ -182,6 +185,63 @@ class LeadResponder:
                     )
                 )
                 lead.status = new_status
+            self._schedule_follow_up(lead, sent=0)
+
+        self._send(snapshot.recipient, text, lead_id, record=True)
+
+    def follow_up(self, lead_id: str) -> None:
+        """Nudge a lead who hasn't replied. Called by the follow-up scheduler."""
+        with self._sessions() as session:
+            lead = session.get_one(Lead, lead_id)
+            if (
+                lead.ai_paused
+                or lead.status not in FOLLOW_UP_STATUSES
+                or not lead.consent
+                or lead.opted_out_at is not None
+            ):
+                return
+            attempt = lead.follow_ups_sent + 1
+            snapshot = _Snapshot(
+                recipient=_recipient(lead),
+                name=lead.name,
+                answers=dict(lead.answers),
+                history=self._history(lead),
+                status=lead.status,
+            )
+
+        total = self._profile.follow_ups.max_follow_ups
+        try:
+            text = self._agent.follow_up(
+                snapshot.name, snapshot.answers, snapshot.history, attempt, total
+            )
+        except LLMError:
+            logger.warning(
+                "Agent failed to write a follow-up for lead %s; using a template", lead_id
+            )
+            text = ""
+        assessment = assess(self._profile, snapshot.answers)
+        text = self._final_text(
+            snapshot.recipient,
+            AgentTurn(text=text or FALLBACK_FOLLOW_UP),
+            assessment.outcome,
+            assessment.reasons,
+        )
+
+        with self._sessions.begin() as session:
+            lead = session.get_one(Lead, lead_id)
+            if (
+                lead.last_inbound_at
+                and lead.last_outbound_at
+                and (lead.last_inbound_at > lead.last_outbound_at)
+            ):
+                return  # They replied while we were writing.
+            lead.follow_ups_sent = attempt
+            lead.events.append(
+                LeadEvent(type="follow_up.sent", detail={"attempt": attempt, "of": total})
+            )
+            self._schedule_follow_up(lead, sent=attempt)
+            if lead.next_follow_up_at is None:
+                lead.events.append(LeadEvent(type="follow_ups.finished", detail={}))
 
         self._send(snapshot.recipient, text, lead_id, record=True)
 
@@ -210,6 +270,14 @@ class LeadResponder:
             elif outcome is Outcome.QUALIFIED:
                 text = f"{text}\n\nA specialist will reach out shortly to schedule your assessment."
         return text
+
+    def _schedule_follow_up(self, lead: Lead, *, sent: int) -> None:
+        if lead.ai_paused or lead.status not in FOLLOW_UP_STATUSES:
+            lead.next_follow_up_at = None
+            return
+        lead.next_follow_up_at = self._profile.follow_ups.schedule(
+            utcnow(), sent, lead.timezone or self._profile.timezone
+        )
 
     def _fail_safe(self, lead_id: str, snapshot: _Snapshot) -> None:
         with self._sessions.begin() as session:

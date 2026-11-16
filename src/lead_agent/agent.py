@@ -140,6 +140,31 @@ class QualifyingAgent:
 
         return turn
 
+    def follow_up(
+        self, name: str, answers: dict[str, Any], history: list[Message], attempt: int, total: int
+    ) -> str:
+        """Write a short nudge for a lead who hasn't replied."""
+        last = attempt >= total
+        nudge = (
+            f"[{name} hasn't replied to your last message. Write follow-up {attempt} of {total}: "
+            "one or two short, friendly sentences. Don't repeat your last message word for "
+            "word. Gently ask the next open question again, or if everything is answered, "
+            "remind them they can book their free assessment. No pressure and no guilt."
+            + (
+                " This is the last follow-up: say you won't keep messaging, and that they can "
+                "reply any time."
+                if last
+                else ""
+            )
+            + "]"
+        )
+        messages = [
+            Message("system", self._system_prompt(name, answers)),
+            *history,
+            Message("user", nudge),
+        ]
+        return self._model.complete(messages, []).content.strip()
+
     def _run_tool(self, call: ToolCall, turn: AgentTurn) -> dict[str, Any]:
         if call.name == "record_answers":
             saved: dict[str, Any] = {}

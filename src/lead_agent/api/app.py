@@ -32,6 +32,7 @@ from lead_agent.channels.email import (
 from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
 from lead_agent.db import LeadSource, make_engine, make_session_factory
+from lead_agent.followups import FollowUpScheduler
 from lead_agent.leads import IntakeResult, LeadIntake, LeadService
 from lead_agent.llm import OpenAICompatibleModel
 from lead_agent.profile import load_profile
@@ -115,6 +116,12 @@ def build_services(settings: Settings) -> Services:
 
     responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile, channels)
     services = Services(leads, responder)
+
+    if profile.follow_ups.delays_hours:
+        scheduler = FollowUpScheduler(
+            sessions, responder.follow_up, profile.follow_ups, profile.timezone
+        )
+        services.workers["follow-ups"] = scheduler.run_polling
 
     if telegram_client is not None:
         bot = TelegramBot(
