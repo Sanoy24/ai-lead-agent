@@ -18,5 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Qualifying agent that replies to new leads and records their answers through a tool generated from the profile.
 - Deterministic scoring and routing: qualified leads get the booking link, weak ones are nurtured, poor fits get a polite close.
 - Opt-outs (STOP, unsubscribe) are handled before the model sees the message and are permanent.
+- Email channel: the agent emails leads by SMTP in one thread per lead, reads their replies by IMAP, and honours STOP and one-click unsubscribe. Auto-replies are ignored.
 - Telegram as a lead channel: anyone who messages the bot becomes a lead, the agent replies in the chat, and /stop opts out.
 - Responder that sends the first reply in the background, pauses the AI on handoff, and sends a holding reply if the model fails.

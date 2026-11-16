@@ -7,19 +7,27 @@ import hmac
 import json
 import logging
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from lead_agent import __version__
 from lead_agent.agent import QualifyingAgent
 from lead_agent.api.ratelimit import RateLimiter
 from lead_agent.channels import Channel
+from lead_agent.channels.email import (
+    EmailChannel,
+    EmailInbox,
+    ImapConfig,
+    ImapMailbox,
+    SmtpConfig,
+    SmtpSender,
+)
 from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
 from lead_agent.db import LeadSource, make_engine, make_session_factory
@@ -51,12 +59,16 @@ class Accepted(BaseModel):
     status: str = "received"
 
 
+Worker = Callable[[threading.Event], None]
+"""A background loop that runs until the event is set."""
+
+
 @dataclass(slots=True)
 class Services:
     leads: LeadService
     responder: LeadResponder
-    telegram: TelegramBot | None = None
-    telegram_client: TelegramClient | None = None
+    workers: dict[str, Worker] = field(default_factory=dict)
+    cleanup: list[Callable[[], None]] = field(default_factory=list)
 
 
 def build_services(settings: Settings) -> Services:
@@ -75,21 +87,66 @@ def build_services(settings: Settings) -> Services:
         fallback_models=fallback_models(settings),
         timeout=settings.llm_timeout_seconds,
     )
+
     channels: list[Channel] = []
     telegram_client = None
     if settings.telegram_bot_token is not None:
         telegram_client = TelegramClient(settings.telegram_bot_token.get_secret_value())
         channels.append(TelegramChannel(telegram_client))
+    if settings.smtp_host and settings.email_from:
+        channels.append(
+            EmailChannel(
+                SmtpSender(
+                    SmtpConfig(
+                        settings.smtp_host,
+                        settings.smtp_port,
+                        settings.smtp_username,
+                        _secret(settings.smtp_password),
+                        settings.smtp_security,
+                    )
+                ),
+                from_address=settings.email_from,
+                from_name=f"{profile.agent_name} at {profile.name}",
+                business_name=profile.name,
+            )
+        )
+
     responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile, channels)
-    services = Services(leads, responder, telegram_client=telegram_client)
+    services = Services(leads, responder)
+
     if telegram_client is not None:
-        services.telegram = TelegramBot(
+        bot = TelegramBot(
             telegram_client,
             leads,
             responder,
             rate_limit_per_minute=settings.telegram_rate_limit_per_minute,
         )
+        services.workers["telegram"] = bot.run_polling
+        services.cleanup.append(telegram_client.close)
+
+    if settings.imap_host:
+        mailbox = ImapMailbox(
+            ImapConfig(
+                settings.imap_host,
+                settings.imap_port,
+                settings.imap_username or settings.smtp_username or "",
+                _secret(settings.imap_password) or _secret(settings.smtp_password) or "",
+                settings.imap_folder,
+            )
+        )
+        inbox = EmailInbox(
+            mailbox,
+            leads.email_lead,
+            lambda lead_id, text: responder.handle_inbound(lead_id, text, "email"),
+        )
+        interval = settings.imap_poll_seconds
+        services.workers["email"] = lambda stop: inbox.run_polling(stop, interval)
+        services.cleanup.append(mailbox.close)
     return services
+
+
+def _secret(value: SecretStr | None) -> str | None:
+    return value.get_secret_value() if value is not None else None
 
 
 def create_app(
@@ -110,21 +167,21 @@ def create_app(
             app.state.responder = responder or built.responder
 
         stop = threading.Event()
-        poller = None
-        if built is not None and built.telegram is not None:
-            poller = threading.Thread(
-                target=built.telegram.run_polling, args=(stop,), name="telegram", daemon=True
-            )
-            poller.start()
+        threads = [
+            threading.Thread(target=worker, args=(stop,), name=name, daemon=True)
+            for name, worker in (built.workers.items() if built else [])
+        ]
+        for thread in threads:
+            thread.start()
         try:
             yield
         finally:
             stop.set()
-            if poller is not None:
-                poller.join(timeout=30)
+            for thread in threads:
+                thread.join(timeout=30)
             app.state.responder.shutdown()
-            if built is not None and built.telegram_client is not None:
-                built.telegram_client.close()
+            for close in built.cleanup if built else []:
+                close()
 
     app = FastAPI(
         title="ai-lead-agent",
