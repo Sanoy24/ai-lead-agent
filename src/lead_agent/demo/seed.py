@@ -307,7 +307,11 @@ def _events(
 ) -> None:
     def add(kind: str, minutes: float, **detail: Any) -> None:
         lead.events.append(
-            LeadEvent(type=kind, detail=detail, created_at=created + timedelta(minutes=minutes))
+            LeadEvent(
+                type=kind,
+                detail=detail,
+                created_at=min(created + timedelta(minutes=minutes), utcnow()),
+            )
         )
 
     add("lead.created", 0, source=lead.source, consent=True)
