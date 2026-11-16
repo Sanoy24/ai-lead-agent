@@ -15,6 +15,11 @@ class Recipient:
     name: str
     email: str | None
     telegram_chat_id: str | None
+    phone: str | None = None
+    preferred_channel: str | None = None
+    """The channel the lead last wrote from, so replies go back the same way."""
+    first_contact: bool = False
+    """True when nothing has been sent to the lead yet."""
 
 
 class Channel(Protocol):

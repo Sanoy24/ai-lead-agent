@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from importlib import resources
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +35,7 @@ from lead_agent.channels.email import (
     SmtpConfig,
     SmtpSender,
 )
+from lead_agent.channels.sms import SmsChannel, TwilioClient, to_e164, valid_twilio_signature
 from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
 from lead_agent.crm.hubspot import HubSpotClient, HubSpotSync
@@ -49,6 +51,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_FRONTEND_DIR = Path(str(resources.files("lead_agent").joinpath("web", "dist")))
 SIGNATURE_HEADER = "X-Signature-256"
 CALCOM_SIGNATURE_HEADER = "X-Cal-Signature-256"
+TWILIO_SIGNATURE_HEADER = "X-Twilio-Signature"
 MAX_WEBHOOK_BYTES = 64 * 1024
 
 
@@ -103,6 +106,16 @@ def build_services(settings: Settings) -> Services:
     if settings.telegram_bot_token is not None:
         telegram_client = TelegramClient(settings.telegram_bot_token.get_secret_value())
         channels.append(TelegramChannel(telegram_client))
+    twilio_client = None
+    if settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number:
+        twilio_client = TwilioClient(
+            settings.twilio_account_sid,
+            settings.twilio_auth_token.get_secret_value(),
+            settings.twilio_from_number,
+        )
+        channels.append(
+            SmsChannel(twilio_client, default_country_code=settings.sms_default_country_code)
+        )
     if settings.smtp_host and settings.email_from:
         channels.append(
             EmailChannel(
@@ -123,6 +136,8 @@ def build_services(settings: Settings) -> Services:
 
     responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile, channels)
     services = Services(leads, responder)
+    if twilio_client is not None:
+        services.cleanup.append(twilio_client.close)
 
     if profile.follow_ups.delays_hours:
         scheduler = FollowUpScheduler(
@@ -288,6 +303,47 @@ def create_app(
         result = leads(request).receive(intake, LeadSource.WEBHOOK, payload.source_detail)
         respond(request, result)
         return Accepted()
+
+    sms_limiter = RateLimiter(settings.sms_rate_limit_per_minute)
+
+    @app.post("/api/webhooks/sms", tags=["intake"], include_in_schema=True)
+    async def receive_sms(request: Request) -> Response:
+        """Texts from leads, sent by Twilio. Checked with ``X-Twilio-Signature``.
+
+        A text from an unknown number starts a new lead; a text from a known
+        lead continues their conversation. Replies are sent in the background.
+        """
+        if settings.twilio_auth_token is None:
+            raise HTTPException(404)
+        body = await request.body()
+        if len(body) > MAX_WEBHOOK_BYTES:
+            raise HTTPException(413, "Payload too large.")
+        params = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
+        url = (
+            f"{settings.public_url.rstrip('/')}{request.url.path}"
+            if settings.public_url
+            else str(request.url)
+        )
+        if not valid_twilio_signature(
+            url,
+            params,
+            request.headers.get(TWILIO_SIGNATURE_HEADER),
+            settings.twilio_auth_token.get_secret_value(),
+        ):
+            raise HTTPException(403, "Invalid Twilio signature.")
+
+        sender = to_e164(params.get("From", ""), settings.sms_default_country_code)
+        text = params.get("Body", "").strip()[:2000]
+        if sender and text and sms_limiter.allow(sender):
+            leads_service: LeadService = request.app.state.leads
+            responder_service: LeadResponder = request.app.state.responder
+            lead = leads_service.sms_lead(sender)
+            if lead is None:
+                responder_service.schedule_first_reply(leads_service.start_sms_lead(sender, text))
+            else:
+                responder_service.schedule_inbound(lead.id, text, "sms")
+        # An empty TwiML response: replies are sent separately through the API.
+        return Response("<Response></Response>", media_type="text/xml")
 
     @app.post("/api/webhooks/calcom", tags=["booking"])
     async def receive_booking(request: Request) -> Accepted:

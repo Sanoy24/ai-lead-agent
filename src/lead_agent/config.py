@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     )
     telegram_rate_limit_per_minute: int = 20
 
+    # SMS through Twilio (optional): text leads, and receive their texts by webhook
+    twilio_account_sid: str | None = None
+    twilio_auth_token: SecretStr | None = Field(
+        default=None, description="Also used to check that SMS webhooks really come from Twilio."
+    )
+    twilio_from_number: str | None = Field(
+        default=None, description="Your Twilio number in E.164 format, e.g. +13035550100."
+    )
+    sms_default_country_code: str = Field(
+        default="+1", description="Added to lead phone numbers that have no country code."
+    )
+    sms_rate_limit_per_minute: int = 20
+
     # Email (optional). Without SMTP settings, messages to email leads are only logged.
     smtp_host: str | None = None
     smtp_port: int = 587

@@ -44,6 +44,7 @@ class LeadSource(StrEnum):
     FORM = "form"
     WEBHOOK = "webhook"
     TELEGRAM = "telegram"
+    SMS = "sms"
 
 
 class Direction(StrEnum):

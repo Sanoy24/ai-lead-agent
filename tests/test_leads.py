@@ -64,6 +64,11 @@ def test_duplicate_detection_also_matches_phone(service: LeadService) -> None:
     assert second.lead_id == first.lead_id
 
 
+def test_us_numbers_written_with_parentheses_are_accepted(service: LeadService) -> None:
+    result = service.receive(intake(email=None, phone="(303) 555-0100"), LeadSource.FORM)
+    assert result.created
+
+
 def test_old_or_opted_out_leads_are_not_reused(
     service: LeadService, sessions: sessionmaker[Session]
 ) -> None:

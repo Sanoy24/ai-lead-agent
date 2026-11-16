@@ -82,6 +82,10 @@ class LeadResponder:
         """Reply to a new lead in the background, so intake returns immediately."""
         return self._executor.submit(self._safely, self.reply_to_new_lead, lead_id)
 
+    def schedule_inbound(self, lead_id: str, text: str, channel: str) -> Future[None]:
+        """Handle a message from a lead in the background (for webhooks that must answer fast)."""
+        return self._executor.submit(self._safely, self.handle_inbound, lead_id, text, channel)
+
     def schedule_reply(self, lead_id: str) -> Future[None]:
         """Continue the conversation after an inbound message was saved."""
         return self._executor.submit(self._safely, self.continue_conversation, lead_id)
@@ -282,7 +286,9 @@ class LeadResponder:
     def _final_text(
         self, recipient: Recipient, turn: AgentTurn, outcome: Outcome, reasons: list[str]
     ) -> str:
-        first_name = recipient.name.split()[0] if recipient.name.strip() else "there"
+        first_name = (
+            recipient.name.split()[0] if any(c.isalpha() for c in recipient.name) else "there"
+        )
         if outcome is Outcome.NOT_A_FIT:
             reason = reasons[0] if reasons else "this isn't a fit for the services we offer"
             return (
@@ -352,7 +358,10 @@ class LeadResponder:
         record: bool,
         author: str = "agent",
     ) -> bool:
-        channel = next(c for c in self._channels if c.can_reach(recipient))
+        reachable = [c for c in self._channels if c.can_reach(recipient)]
+        channel = next(
+            (c for c in reachable if c.name == recipient.preferred_channel), reachable[0]
+        )
         delivered = True
         try:
             channel.send(recipient, text)
@@ -391,10 +400,19 @@ class LeadResponder:
             logger.exception("Responder task failed")
 
 
+_REPLY_CHANNELS = {"email", "telegram", "sms"}
+
+
 def _recipient(lead: Lead) -> Recipient:
+    last_inbound = next(
+        (m.channel for m in reversed(lead.messages) if m.direction == Direction.INBOUND), None
+    )
     return Recipient(
         lead_id=lead.id,
         name=lead.name,
         email=lead.email,
         telegram_chat_id=lead.telegram_chat_id,
+        phone=lead.phone,
+        preferred_channel=last_inbound if last_inbound in _REPLY_CHANNELS else None,
+        first_contact=lead.last_outbound_at is None,
     )

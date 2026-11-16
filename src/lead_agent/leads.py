@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from lead_agent.channels.sms import phone_key
 from lead_agent.db import (
     Direction,
     Lead,
@@ -21,11 +22,12 @@ from lead_agent.db import (
     utcnow,
 )
 
+SMS_CONSENT_TEXT = "Texted our business number. They can opt out at any time by replying STOP."
 TELEGRAM_CONSENT_TEXT = (
     "Started a conversation with our Telegram bot. They can opt out at any time with /stop."
 )
 
-_PHONE = re.compile(r"^\+?[0-9][0-9 ().-]{5,24}$")
+_PHONE = re.compile(r"^\+?[0-9(][0-9 ().-]{5,24}$")
 
 
 class LeadIntake(BaseModel):
@@ -177,6 +179,52 @@ class LeadService:
                 .order_by(Lead.created_at.desc())
                 .limit(1)
             ).first()
+
+    def sms_lead(self, phone: str) -> LeadRef | None:
+        """The most recent lead with this phone number, however it was written."""
+        key = phone_key(phone)
+        if len(key) < 7:
+            return None
+        with self._sessions() as session:
+            candidates = session.scalars(
+                select(Lead)
+                .where(Lead.phone.like(f"%{key[-4:]}"))
+                .order_by(Lead.created_at.desc())
+                .limit(50)
+            ).all()
+            lead = next((c for c in candidates if c.phone and phone_key(c.phone) == key), None)
+            return LeadRef(lead.id, LeadStatus(lead.status)) if lead else None
+
+    def start_sms_lead(self, phone: str, message: str) -> str:
+        """Create a lead for someone who texted the business number.
+
+        Texting the business is the person's own request to talk, which is
+        recorded as their consent. Replying STOP opts them out.
+        """
+        with self._sessions.begin() as session:
+            lead = Lead(
+                source=LeadSource.SMS,
+                name=phone,
+                phone=phone,
+                consent=True,
+                consent_text=SMS_CONSENT_TEXT,
+                status=LeadStatus.NEW,
+                last_inbound_at=utcnow(),
+            )
+            lead.messages.append(
+                LeadMessage(
+                    direction=Direction.INBOUND, channel=LeadSource.SMS, content=message[:2000]
+                )
+            )
+            lead.events.append(
+                LeadEvent(
+                    type="lead.created",
+                    detail={"source": LeadSource.SMS, "source_detail": None, "consent": True},
+                )
+            )
+            session.add(lead)
+            session.flush()
+            return lead.id
 
     def start_telegram_lead(self, chat_id: str, name: str, message: str | None = None) -> str:
         """Create a lead for someone who started a chat with the Telegram bot.
