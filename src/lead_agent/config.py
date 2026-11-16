@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     imap_folder: str = "INBOX"
     imap_poll_seconds: float = 60.0
 
+    # Dashboard
+    admin_password: SecretStr | None = Field(
+        default=None, description="Enables the dashboard and its admin API when set."
+    )
+    session_secret: SecretStr | None = Field(
+        default=None,
+        description="Key for signing dashboard session cookies. If unset, a random key is "
+        "generated at startup and everyone is signed out on every restart.",
+    )
+
     # App
     database_url: str = "sqlite:///data/local/leads.db"
     allowed_origins: list[str] = Field(

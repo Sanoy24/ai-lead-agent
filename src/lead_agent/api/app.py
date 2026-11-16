@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from lead_agent import __version__
 from lead_agent.agent import QualifyingAgent
+from lead_agent.api.admin import build_admin_router
 from lead_agent.api.ratelimit import RateLimiter
 from lead_agent.booking import BookingService, CalcomWebhook
 from lead_agent.channels import Channel
@@ -213,6 +214,7 @@ def create_app(
         )
 
     form_limiter = RateLimiter(settings.form_rate_limit_per_minute)
+    app.include_router(build_admin_router(settings))
 
     def leads(request: Request) -> LeadService:
         svc: LeadService = request.app.state.leads

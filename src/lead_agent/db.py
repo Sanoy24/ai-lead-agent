@@ -110,6 +110,8 @@ class LeadMessage(Base):
     direction: Mapped[str] = mapped_column(String(8))
     channel: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(String(8), default=None)
+    """Who wrote an outbound message: "agent", "team" or "system"."""
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     lead: Mapped[Lead] = relationship(back_populates="messages")
