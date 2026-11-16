@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     )
     form_rate_limit_per_minute: int = 5
 
+    # Telegram (optional): people who message the bot become leads
+    telegram_bot_token: SecretStr | None = Field(
+        default=None, description="Token from @BotFather. Enables the Telegram channel."
+    )
+    telegram_rate_limit_per_minute: int = 20
+
     # App
     database_url: str = "sqlite:///data/local/leads.db"
     allowed_origins: list[str] = Field(

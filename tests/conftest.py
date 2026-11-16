@@ -13,7 +13,7 @@ CONSENT = "You may contact me about my enquiry."
 def isolate_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep a developer's .env file and environment variables out of the tests."""
     monkeypatch.chdir(tmp_path)
-    for name in ("WEBHOOK_SECRET", "DATABASE_URL", "BUSINESS_NAME"):
+    for name in ("WEBHOOK_SECRET", "DATABASE_URL", "BUSINESS_NAME", "TELEGRAM_BOT_TOKEN"):
         monkeypatch.delenv(name, raising=False)
 
 

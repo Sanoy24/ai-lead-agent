@@ -27,6 +27,10 @@ The language model and plain code each do what they're good at:
 
 Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
 
+## Telegram
+
+Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and anyone who messages your bot becomes a lead. The agent replies in the chat with a typing indicator, keeps the conversation going across messages, and sends the booking link once the lead qualifies. `/stop` opts out, and `/start` lets someone who opted out begin again. The bot uses long polling, so it runs on a laptop or a server without a public URL.
+
 ## Design principles
 
 - **Consent first.** It only contacts people who asked to be contacted, and opt-outs are permanent.

@@ -21,6 +21,10 @@ from lead_agent.db import (
     utcnow,
 )
 
+TELEGRAM_CONSENT_TEXT = (
+    "Started a conversation with our Telegram bot. They can opt out at any time with /stop."
+)
+
 _PHONE = re.compile(r"^\+?[0-9][0-9 ().-]{5,24}$")
 
 
@@ -77,6 +81,12 @@ class IntakeResult:
     lead_id: str
     created: bool
     """False when the submission was added to an existing recent lead."""
+
+
+@dataclass(frozen=True, slots=True)
+class LeadRef:
+    id: str
+    status: LeadStatus
 
 
 class LeadService:
@@ -140,6 +150,51 @@ class LeadService:
             session.add(lead)
             session.flush()
             return IntakeResult(lead.id, created=True)
+
+    def telegram_lead(self, chat_id: str) -> LeadRef | None:
+        """The most recent lead for a Telegram chat, if there is one."""
+        with self._sessions() as session:
+            lead = session.scalars(
+                select(Lead)
+                .where(Lead.telegram_chat_id == chat_id)
+                .order_by(Lead.created_at.desc())
+                .limit(1)
+            ).first()
+            return LeadRef(lead.id, LeadStatus(lead.status)) if lead else None
+
+    def start_telegram_lead(self, chat_id: str, name: str, message: str | None = None) -> str:
+        """Create a lead for someone who started a chat with the Telegram bot.
+
+        Writing to the bot is the person's own request to talk, which is recorded
+        as their consent. ``/stop`` opts them out.
+        """
+        with self._sessions.begin() as session:
+            lead = Lead(
+                source=LeadSource.TELEGRAM,
+                name=name.strip()[:120] or "Telegram user",
+                telegram_chat_id=chat_id,
+                consent=True,
+                consent_text=TELEGRAM_CONSENT_TEXT,
+                status=LeadStatus.NEW,
+                last_inbound_at=utcnow(),
+            )
+            if message:
+                lead.messages.append(
+                    LeadMessage(
+                        direction=Direction.INBOUND,
+                        channel=LeadSource.TELEGRAM,
+                        content=message[:2000],
+                    )
+                )
+            lead.events.append(
+                LeadEvent(
+                    type="lead.created",
+                    detail={"source": LeadSource.TELEGRAM, "source_detail": None, "consent": True},
+                )
+            )
+            session.add(lead)
+            session.flush()
+            return lead.id
 
     def _recent_lead(self, session: Session, email: str | None, phone: str | None) -> Lead | None:
         conditions = []
