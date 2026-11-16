@@ -6,8 +6,10 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,6 +19,8 @@ from pydantic import BaseModel, Field, ValidationError
 from lead_agent import __version__
 from lead_agent.agent import QualifyingAgent
 from lead_agent.api.ratelimit import RateLimiter
+from lead_agent.channels import Channel
+from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
 from lead_agent.db import LeadSource, make_engine, make_session_factory
 from lead_agent.leads import IntakeResult, LeadIntake, LeadService
@@ -47,7 +51,15 @@ class Accepted(BaseModel):
     status: str = "received"
 
 
-def build_services(settings: Settings) -> tuple[LeadService, LeadResponder]:
+@dataclass(slots=True)
+class Services:
+    leads: LeadService
+    responder: LeadResponder
+    telegram: TelegramBot | None = None
+    telegram_client: TelegramClient | None = None
+
+
+def build_services(settings: Settings) -> Services:
     sessions = make_session_factory(make_engine(settings.database_url))
     leads = LeadService(
         sessions,
@@ -63,8 +75,21 @@ def build_services(settings: Settings) -> tuple[LeadService, LeadResponder]:
         fallback_models=fallback_models(settings),
         timeout=settings.llm_timeout_seconds,
     )
-    responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile)
-    return leads, responder
+    channels: list[Channel] = []
+    telegram_client = None
+    if settings.telegram_bot_token is not None:
+        telegram_client = TelegramClient(settings.telegram_bot_token.get_secret_value())
+        channels.append(TelegramChannel(telegram_client))
+    responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile, channels)
+    services = Services(leads, responder, telegram_client=telegram_client)
+    if telegram_client is not None:
+        services.telegram = TelegramBot(
+            telegram_client,
+            leads,
+            responder,
+            rate_limit_per_minute=settings.telegram_rate_limit_per_minute,
+        )
+    return services
 
 
 def create_app(
@@ -76,14 +101,30 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if service is None or responder is None:
-            built_leads, built_responder = build_services(settings)
-        app.state.leads = service or built_leads
-        app.state.responder = responder or built_responder
+        built: Services | None = None
+        if service is not None and responder is not None:
+            app.state.leads, app.state.responder = service, responder
+        else:
+            built = build_services(settings)
+            app.state.leads = service or built.leads
+            app.state.responder = responder or built.responder
+
+        stop = threading.Event()
+        poller = None
+        if built is not None and built.telegram is not None:
+            poller = threading.Thread(
+                target=built.telegram.run_polling, args=(stop,), name="telegram", daemon=True
+            )
+            poller.start()
         try:
             yield
         finally:
+            stop.set()
+            if poller is not None:
+                poller.join(timeout=30)
             app.state.responder.shutdown()
+            if built is not None and built.telegram_client is not None:
+                built.telegram_client.close()
 
     app = FastAPI(
         title="ai-lead-agent",
