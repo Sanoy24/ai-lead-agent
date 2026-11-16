@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -54,6 +55,23 @@ class Settings(BaseSettings):
         default=None, description="Token from @BotFather. Enables the Telegram channel."
     )
     telegram_rate_limit_per_minute: int = 20
+
+    # Email (optional). Without SMTP settings, messages to email leads are only logged.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+    email_from: str | None = Field(
+        default=None, description="The address the agent sends from and leads reply to."
+    )
+    # Reading replies (optional). Defaults to the SMTP username and password.
+    imap_host: str | None = None
+    imap_port: int = 993
+    imap_username: str | None = None
+    imap_password: SecretStr | None = None
+    imap_folder: str = "INBOX"
+    imap_poll_seconds: float = 60.0
 
     # App
     database_url: str = "sqlite:///data/local/leads.db"

@@ -27,6 +27,10 @@ The language model and plain code each do what they're good at:
 
 Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
 
+## Email
+
+Set the `SMTP_*` and `EMAIL_FROM` settings and the agent emails leads who gave an address. Each lead's messages stay in one thread, and every email offers a way out ("Reply STOP", plus a one-click unsubscribe header). Set `IMAP_HOST` too and the agent reads replies every minute and continues the conversation; out-of-office and other automatic replies are ignored. A free Gmail account with an app password works for both. See [.env.example](.env.example).
+
 ## Telegram
 
 Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and anyone who messages your bot becomes a lead. The agent replies in the chat with a typing indicator, keeps the conversation going across messages, and sends the booking link once the lead qualifies. `/stop` opts out, and `/start` lets someone who opted out begin again. The bot uses long polling, so it runs on a laptop or a server without a public URL.

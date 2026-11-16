@@ -162,6 +162,22 @@ class LeadService:
             ).first()
             return LeadRef(lead.id, LeadStatus(lead.status)) if lead else None
 
+    def email_lead(self, sender: str, lead_id: str | None = None) -> str | None:
+        """The lead an email reply belongs to: the one named in the thread, or the
+        most recent lead with the sender's address."""
+        sender = sender.lower()
+        with self._sessions() as session:
+            if lead_id is not None:
+                lead = session.get(Lead, lead_id)
+                if lead is not None and lead.email == sender:
+                    return lead.id
+            return session.scalars(
+                select(Lead.id)
+                .where(Lead.email == sender)
+                .order_by(Lead.created_at.desc())
+                .limit(1)
+            ).first()
+
     def start_telegram_lead(self, chat_id: str, name: str, message: str | None = None) -> str:
         """Create a lead for someone who started a chat with the Telegram bot.
 
