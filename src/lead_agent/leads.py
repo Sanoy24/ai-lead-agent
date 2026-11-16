@@ -108,7 +108,12 @@ class LeadService:
         return self._sessions
 
     def receive(
-        self, intake: LeadIntake, source: LeadSource, source_detail: str | None = None
+        self,
+        intake: LeadIntake,
+        source: LeadSource,
+        source_detail: str | None = None,
+        *,
+        consent_text: str | None = None,
     ) -> IntakeResult:
         email = intake.email.lower() if intake.email else None
         with self._sessions.begin() as session:
@@ -135,7 +140,7 @@ class LeadService:
                 service_interest=intake.service_interest,
                 timezone=intake.timezone,
                 consent=True,
-                consent_text=self._consent_text,
+                consent_text=consent_text or self._consent_text,
                 status=LeadStatus.NEW,
                 last_inbound_at=utcnow(),
             )
@@ -152,6 +157,13 @@ class LeadService:
             session.add(lead)
             session.flush()
             return IntakeResult(lead.id, created=True)
+
+    def link_crm_contact(self, lead_id: str, contact_id: str) -> None:
+        """Record the CRM id for a lead that came from the CRM, so sync updates it."""
+        with self._sessions.begin() as session:
+            lead = session.get_one(Lead, lead_id)
+            if lead.crm_contact_id is None:
+                lead.crm_contact_id = contact_id[:64]
 
     def telegram_lead(self, chat_id: str) -> LeadRef | None:
         """The most recent lead for a Telegram chat, if there is one."""

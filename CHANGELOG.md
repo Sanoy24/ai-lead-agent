@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Qualifying agent that replies to new leads and records their answers through a tool generated from the profile.
 - Deterministic scoring and routing: qualified leads get the booking link, weak ones are nurtured, poor fits get a polite close.
 - Opt-outs (STOP, unsubscribe) are handled before the model sees the message and are permanent.
+- GoHighLevel: leads sync to contacts in a sub-account with a stage tag and notes, and a workflow Webhook action can send GoHighLevel leads to the agent. CRM sync is now a shared engine with HubSpot and GoHighLevel connectors; `HUBSPOT_SYNC_SECONDS` is replaced by `CRM_SYNC_SECONDS`.
 - Reactivation campaigns: import past leads or customers from a CSV (after confirming a prior relationship) and the agent sends each a personal opener through the follow-up scheduler, outside quiet hours. Opted-out people and anyone in a recent conversation are skipped. A Campaigns page shows replies, bookings and opt-outs per campaign.
 - SMS through Twilio: leads with a phone number get texts, a text from a new number starts a lead, and incoming texts are verified with Twilio's signature. The first text carries an opt-out line.
 - Replies go back on the channel the lead last used (SMS, email or Telegram).
