@@ -131,6 +131,8 @@ def test_qualified_lead_gets_the_booking_link(
     text = channel.sent[0][1]
     assert text.startswith("Perfect, thanks Dana!")
     assert "pick a time for your free assessment here: https://cal.com/" in text
+    assert f"metadata%5Blead_id%5D={lead_id}" in text
+    assert "email=dana%40example.com" in text
     lead = load(sessions, lead_id)
     assert (lead.status, lead.score) == (LeadStatus.QUALIFIED, 90)
 

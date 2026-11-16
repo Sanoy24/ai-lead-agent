@@ -27,6 +27,10 @@ The language model and plain code each do what they're good at:
 
 Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
 
+## Booking
+
+Qualified leads get your booking link prefilled with their name and email. Cal.com sends booking events back to `/api/webhooks/calcom` (signed with `CALCOM_WEBHOOK_SECRET`), and the agent marks the lead **booked**, stops following up, and confirms the time in the lead's time zone. Reschedules and cancellations are tracked too. Bookings are matched by a lead id carried in the link, or by the attendee's email.
+
 ## Email
 
 Set the `SMTP_*` and `EMAIL_FROM` settings and the agent emails leads who gave an address. Each lead's messages stay in one thread, and every email offers a way out ("Reply STOP", plus a one-click unsubscribe header). Set `IMAP_HOST` too and the agent reads replies every minute and continues the conversation; out-of-office and other automatic replies are ignored. A free Gmail account with an app password works for both. See [.env.example](.env.example).

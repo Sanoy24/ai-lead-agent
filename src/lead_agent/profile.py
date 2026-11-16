@@ -6,6 +6,7 @@ import tomllib
 from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -64,6 +65,20 @@ class BusinessProfile(BaseModel):
         if len(keys) != len(set(keys)):
             raise ValueError("Question keys must be unique.")
         return self
+
+    def booking_link(self, lead_id: str, name: str, email: str | None) -> str | None:
+        """The booking URL, prefilled with the lead's details.
+
+        Cal.com prefills ``name`` and ``email`` and passes ``metadata[...]`` back
+        in its webhooks, which is how a booking is matched to the lead.
+        """
+        if not self.booking_url:
+            return None
+        parts = urlsplit(self.booking_url)
+        query = [*parse_qsl(parts.query), ("name", name), ("metadata[lead_id]", lead_id)]
+        if email:
+            query.append(("email", email))
+        return urlunsplit(parts._replace(query=urlencode(query)))
 
     def question(self, key: str) -> Question | None:
         return next((q for q in self.questions if q.key == key), None)

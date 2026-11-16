@@ -9,10 +9,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from lead_agent.api import create_app
-from lead_agent.api.app import SIGNATURE_HEADER, sign
+from lead_agent.api.app import CALCOM_SIGNATURE_HEADER, SIGNATURE_HEADER, sign
 from lead_agent.config import Settings
-from lead_agent.db import Lead
-from lead_agent.leads import LeadService
+from lead_agent.db import Lead, LeadSource, LeadStatus
+from lead_agent.leads import LeadIntake, LeadService
 from lead_agent.responder import LeadResponder
 
 SECRET = "whsec-test-secret"
@@ -34,12 +34,16 @@ class RecordingResponder:
     def __init__(self) -> None:
         self.first_replies: list[str] = []
         self.replies: list[str] = []
+        self.notifications: list[tuple[str, str]] = []
 
     def schedule_first_reply(self, lead_id: str) -> None:
         self.first_replies.append(lead_id)
 
     def schedule_reply(self, lead_id: str) -> None:
         self.replies.append(lead_id)
+
+    def schedule_notify(self, lead_id: str, text: str) -> None:
+        self.notifications.append((lead_id, text))
 
     def shutdown(self) -> None:
         pass
@@ -168,3 +172,70 @@ def test_webhook_rejects_invalid_leads_and_large_bodies(make_client: ClientFacto
 def test_webhook_is_disabled_without_a_secret(make_client: ClientFactory) -> None:
     with make_client(webhook_secret=None) as client:
         assert post_webhook(client, FORM) == 404
+
+
+# --- Cal.com bookings ------------------------------------------------------------
+
+CAL_SECRET = "cal-test-secret"
+
+
+def cal_event(lead_id: str, trigger: str = "BOOKING_CREATED") -> bytes:
+    return json.dumps(
+        {
+            "triggerEvent": trigger,
+            "payload": {
+                "uid": "bk_1",
+                "startTime": "2026-11-20T16:00:00Z",
+                "attendees": [{"email": "nobody@example.com", "name": "Sam Carter"}],
+                "metadata": {"lead_id": lead_id},
+            },
+        }
+    ).encode()
+
+
+def cal_signature(body: bytes, secret: str = CAL_SECRET) -> str:
+    return sign(body, secret).removeprefix("sha256=")
+
+
+def post_booking(client: TestClient, body: bytes, signature: str | None = None) -> int:
+    headers = {CALCOM_SIGNATURE_HEADER: signature} if signature is not None else {}
+    return int(client.post("/api/webhooks/calcom", content=body, headers=headers).status_code)
+
+
+def test_signed_booking_marks_the_lead_booked_and_confirms(
+    make_client: ClientFactory,
+    service: LeadService,
+    sessions: sessionmaker[Session],
+    responder: RecordingResponder,
+) -> None:
+    lead_id = service.receive(LeadIntake.model_validate(FORM), LeadSource.FORM).lead_id
+    body = cal_event(lead_id)
+    with make_client(calcom_webhook_secret=SecretStr(CAL_SECRET)) as client:
+        assert post_booking(client, body, cal_signature(body)) == 200
+    with sessions() as session:
+        assert session.get_one(Lead, lead_id).status == LeadStatus.BOOKED
+    # 16:00 UTC is 9:00 AM in Denver, the demo business's time zone.
+    assert responder.notifications == [
+        (lead_id, "You're all set for Friday, November 20 at 9:00 AM. See you then!")
+    ]
+
+
+def test_booking_webhook_rejects_bad_signatures_and_is_off_without_a_secret(
+    make_client: ClientFactory,
+) -> None:
+    body = cal_event("x")
+    with make_client(calcom_webhook_secret=SecretStr(CAL_SECRET)) as client:
+        assert post_booking(client, body, cal_signature(body, "wrong")) == 401
+        assert post_booking(client, body) == 401
+    with make_client() as client:
+        assert post_booking(client, body) == 404
+
+
+def test_cal_ping_and_unknown_bookings_are_accepted_quietly(
+    make_client: ClientFactory, responder: RecordingResponder
+) -> None:
+    ping = json.dumps({"triggerEvent": "PING", "payload": {}}).encode()
+    with make_client(calcom_webhook_secret=SecretStr(CAL_SECRET)) as client:
+        for body in (ping, cal_event("unknown-lead")):
+            assert post_booking(client, body, cal_signature(body)) == 200
+    assert responder.notifications == []

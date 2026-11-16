@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default=None,
         description="Shared secret for signing webhook requests. Enables /api/webhooks/leads.",
     )
+    calcom_webhook_secret: SecretStr | None = Field(
+        default=None,
+        description="Secret set on the Cal.com webhook. Enables /api/webhooks/calcom.",
+    )
     duplicate_window_hours: int = Field(
         default=24,
         description="A repeat submission from the same email or phone within this window "
