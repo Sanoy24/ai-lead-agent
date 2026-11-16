@@ -35,3 +35,6 @@ Thumbs.db
 
 # Recordings
 *.mp4
+
+# Browser automation output
+.playwright-mcp/
