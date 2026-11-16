@@ -1,0 +1,60 @@
+# Business profile for the fictional demo company. Copy this file and point
+# BUSINESS_PROFILE at it to set up a real business. The agent's questions,
+# scoring and tone all come from here, not from code.
+
+name = "Brightline Solar & Roofing"
+agent_name = "Alex"
+description = """
+A local, family-owned company that installs solar panels and repairs and replaces roofs.
+Free on-site assessments. Licensed and insured, 12 years in business.
+"""
+service_area = "the Denver metro area"
+timezone = "America/Denver"
+booking_url = "https://cal.com/brightline-demo/assessment"
+
+# Things the agent must never do, whatever the lead asks.
+rules = [
+  "Never quote prices, savings, financing terms or tax credits. Say a specialist covers those during the free assessment.",
+  "Never promise availability or dates. Offer the booking link instead.",
+  "Don't give roofing or electrical safety advice beyond 'please call a professional' for emergencies.",
+]
+
+# Questions are asked in this order, only if the lead hasn't already answered them.
+# Scoring: each answered question adds its points. A "disqualify" rule ends the
+# conversation politely. Leads scoring at least `qualify_score` with all required
+# answers get the booking link.
+qualify_score = 70
+
+[[questions]]
+key = "service"
+ask = "Which service are you interested in: solar installation, roof repair or roof replacement?"
+type = "choice"
+choices = ["solar installation", "roof repair", "roof replacement"]
+required = true
+points = 20
+
+[[questions]]
+key = "homeowner"
+ask = "Do you own the property?"
+type = "boolean"
+required = true
+points = 20
+disqualify_if = false
+disqualify_reason = "We can only work with property owners."
+
+[[questions]]
+key = "zip_code"
+ask = "What's the ZIP code of the property?"
+type = "zip"
+required = true
+points = 20
+allowed_prefixes = ["800", "801", "802", "803", "804", "805"]
+disqualify_reason = "The property is outside our service area."
+
+[[questions]]
+key = "timeline"
+ask = "When are you hoping to get this done: as soon as possible, within 1 to 3 months, within 3 to 6 months, or are you just researching?"
+type = "choice"
+choices = ["as soon as possible", "1 to 3 months", "3 to 6 months", "just researching"]
+required = true
+points_by_choice = { "as soon as possible" = 40, "1 to 3 months" = 30, "3 to 6 months" = 15, "just researching" = 0 }
