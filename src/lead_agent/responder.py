@@ -42,6 +42,10 @@ _STATUS_FOR_OUTCOME = {
 _FINAL_STATUSES = {LeadStatus.BOOKED, LeadStatus.LOST, LeadStatus.OPTED_OUT}
 
 
+class OptedOutError(RuntimeError):
+    """The lead opted out, so nothing more may be sent to them."""
+
+
 def is_opt_out(text: str) -> bool:
     normalized = re.sub(r"[^a-z ]", "", text.lower()).strip()
     return normalized in OPT_OUT_WORDS
@@ -92,7 +96,35 @@ class LeadResponder:
             if lead.status == LeadStatus.OPTED_OUT or not lead.consent:
                 return
             recipient = _recipient(lead)
-        self._send(recipient, text, lead_id, record=True)
+        self._send(recipient, text, lead_id, record=True, author="system")
+
+    def set_paused(self, lead_id: str, paused: bool, *, by: str = "team") -> None:
+        """Take over a conversation (pause the AI) or hand it back."""
+        with self._sessions.begin() as session:
+            lead = session.get_one(Lead, lead_id)
+            if lead.ai_paused == paused:
+                return
+            lead.ai_paused = paused
+            if paused:
+                lead.next_follow_up_at = None
+            else:
+                self._schedule_follow_up(lead, sent=lead.follow_ups_sent)
+            lead.events.append(
+                LeadEvent(type="lead.taken_over" if paused else "lead.resumed", detail={"by": by})
+            )
+
+    def send_from_team(self, lead_id: str, text: str) -> bool:
+        """Send a message written by a person. Pauses the AI so it doesn't talk over them.
+
+        Returns False if the message couldn't be delivered.
+        """
+        with self._sessions() as session:
+            lead = session.get_one(Lead, lead_id)
+            if lead.status == LeadStatus.OPTED_OUT:
+                raise OptedOutError(lead_id)
+            recipient = _recipient(lead)
+        self.set_paused(lead_id, True)
+        return self._send(recipient, text, lead_id, record=True, author="team")
 
     @property
     def profile(self) -> BusinessProfile:
@@ -127,7 +159,7 @@ class LeadResponder:
             else:
                 confirm = False
         if confirm:
-            self._send(recipient, OPT_OUT_CONFIRMATION, lead_id, record=True)
+            self._send(recipient, OPT_OUT_CONFIRMATION, lead_id, record=True, author="system")
             return
         self.continue_conversation(lead_id)
 
@@ -311,7 +343,15 @@ class LeadResponder:
             history.insert(0, Message("user", f"[{intro}.]"))
         return history
 
-    def _send(self, recipient: Recipient, text: str, lead_id: str, *, record: bool) -> None:
+    def _send(
+        self,
+        recipient: Recipient,
+        text: str,
+        lead_id: str,
+        *,
+        record: bool,
+        author: str = "agent",
+    ) -> bool:
         channel = next(c for c in self._channels if c.can_reach(recipient))
         delivered = True
         try:
@@ -320,11 +360,16 @@ class LeadResponder:
             delivered = False
             logger.warning("Could not send to lead %s via %s: %s", lead_id, channel.name, exc)
         if not record:
-            return
+            return delivered
         with self._sessions.begin() as session:
             lead = session.get_one(Lead, lead_id)
             lead.messages.append(
-                LeadMessage(direction=Direction.OUTBOUND, channel=channel.name, content=text)
+                LeadMessage(
+                    direction=Direction.OUTBOUND,
+                    channel=channel.name,
+                    content=text,
+                    author=author,
+                )
             )
             now = utcnow()
             if delivered:
@@ -336,6 +381,7 @@ class LeadResponder:
                 lead.events.append(
                     LeadEvent(type="message.failed", detail={"channel": channel.name})
                 )
+        return delivered
 
     @staticmethod
     def _safely(fn: Any, *args: Any) -> None:
