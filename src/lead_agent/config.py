@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     imap_folder: str = "INBOX"
     imap_poll_seconds: float = 60.0
 
+    # HubSpot (optional): leads become contacts, with key moments as notes
+    hubspot_access_token: SecretStr | None = Field(
+        default=None, description="Private app token with contacts read and write scopes."
+    )
+    hubspot_portal_id: str | None = Field(
+        default=None, description="Your HubSpot account id, for links from the dashboard."
+    )
+    hubspot_sync_seconds: float = 30.0
+    public_url: str | None = Field(
+        default=None,
+        description="Where this app is reachable, e.g. https://leads.example.com. Used for "
+        "links back to the dashboard from HubSpot notes.",
+    )
+
     # Dashboard
     admin_password: SecretStr | None = Field(
         default=None, description="Enables the dashboard and its admin API when set."

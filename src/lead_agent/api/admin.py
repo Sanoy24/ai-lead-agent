@@ -70,6 +70,8 @@ class EventOut(BaseModel):
 
 
 class LeadDetail(LeadSummary):
+    crm_url: str | None
+    """The lead's contact in HubSpot, once synced."""
     telegram_chat_id: str | None
     timezone: str | None
     answers: dict[str, Any]
@@ -272,7 +274,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
     @private.get("/leads/{lead_id}")
     def lead_detail(lead_id: str, request: Request) -> LeadDetail:
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id))
+            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
 
     @private.post("/leads/{lead_id}/takeover")
     def take_over(lead_id: str, request: Request) -> LeadDetail:
@@ -298,7 +300,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
         if not delivered:
             raise HTTPException(502, "The message was saved but couldn't be delivered.")
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id))
+            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
 
     @private.post("/leads/{lead_id}/status")
     def change_status(lead_id: str, body: StatusChange, request: Request) -> LeadDetail:
@@ -318,14 +320,14 @@ def build_admin_router(settings: Settings) -> APIRouter:
                 if body.status in _CLOSED:
                     lead.next_follow_up_at = None
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id))
+            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
 
     def _toggle(request: Request, lead_id: str, *, paused: bool) -> LeadDetail:
         with sessions(request)() as db:
             _get(db, lead_id)
         responder(request).set_paused(lead_id, paused)
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id))
+            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
 
     router = APIRouter()
     router.include_router(public)
@@ -384,9 +386,15 @@ def _summary(lead: Lead) -> LeadSummary:
     )
 
 
-def _detail(lead: Lead) -> LeadDetail:
+def _detail(lead: Lead, portal_id: str | None = None) -> LeadDetail:
+    crm_url = (
+        f"https://app.hubspot.com/contacts/{portal_id}/record/0-1/{lead.crm_contact_id}"
+        if portal_id and lead.crm_contact_id
+        else None
+    )
     return LeadDetail(
         **_summary(lead).model_dump(),
+        crm_url=crm_url,
         telegram_chat_id=lead.telegram_chat_id,
         timezone=lead.timezone,
         answers=lead.answers,

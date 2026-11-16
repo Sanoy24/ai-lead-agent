@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Qualifying agent that replies to new leads and records their answers through a tool generated from the profile.
 - Deterministic scoring and routing: qualified leads get the booking link, weak ones are nurtured, poor fits get a polite close.
 - Opt-outs (STOP, unsubscribe) are handled before the model sees the message and are permanent.
+- HubSpot sync: leads become contacts (matched by email, no duplicates) with their lead status kept in step with the pipeline, and key moments (new enquiry, status changes, bookings, handoffs, opt-outs) added as notes. Runs in the background and catches up after outages.
+- Columns added in new versions are added to existing databases automatically.
 - Dashboard (React, TypeScript, Tailwind): overview with speed-to-lead metrics and the pipeline, a searchable lead list, and a lead page with the conversation, answers, follow-ups and activity, where a person can take over and reply.
 - Demo landing page for the fictional business with the lead form, served by the same app.
 - `python -m lead_agent.demo.seed` fills the database with realistic demo leads.
