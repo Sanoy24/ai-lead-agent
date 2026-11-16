@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 from lead_agent import __version__
 from lead_agent.agent import QualifyingAgent
 from lead_agent.api.ratelimit import RateLimiter
+from lead_agent.booking import BookingService, CalcomWebhook
 from lead_agent.channels import Channel
 from lead_agent.channels.email import (
     EmailChannel,
@@ -39,6 +40,7 @@ from lead_agent.responder import LeadResponder
 logger = logging.getLogger(__name__)
 
 SIGNATURE_HEADER = "X-Signature-256"
+CALCOM_SIGNATURE_HEADER = "X-Cal-Signature-256"
 MAX_WEBHOOK_BYTES = 64 * 1024
 
 
@@ -153,6 +155,7 @@ def create_app(
     settings: Settings | None = None,
     service: LeadService | None = None,
     responder: LeadResponder | None = None,
+    bookings: BookingService | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -165,6 +168,9 @@ def create_app(
             built = build_services(settings)
             app.state.leads = service or built.leads
             app.state.responder = responder or built.responder
+        app.state.bookings = bookings or BookingService(
+            app.state.leads.sessions, load_profile(settings.business_profile).timezone
+        )
 
         stop = threading.Event()
         threads = [
@@ -258,6 +264,34 @@ def create_app(
         intake = LeadIntake.model_validate(payload.model_dump(exclude={"source_detail"}))
         result = leads(request).receive(intake, LeadSource.WEBHOOK, payload.source_detail)
         respond(request, result)
+        return Accepted()
+
+    @app.post("/api/webhooks/calcom", tags=["booking"])
+    async def receive_booking(request: Request) -> Accepted:
+        """Booking events from Cal.com (created, rescheduled, cancelled).
+
+        In Cal.com, add a webhook pointing here with the same secret as
+        ``CALCOM_WEBHOOK_SECRET``. Cal.com signs the body in ``X-Cal-Signature-256``.
+        """
+        if settings.calcom_webhook_secret is None:
+            raise HTTPException(404)
+        body = await request.body()
+        if len(body) > MAX_WEBHOOK_BYTES:
+            raise HTTPException(413, "Payload too large.")
+        secret = settings.calcom_webhook_secret.get_secret_value()
+        signature = request.headers.get(CALCOM_SIGNATURE_HEADER, "")
+        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature.strip().removeprefix("sha256="), expected):
+            raise HTTPException(401, "Invalid or missing signature.")
+        try:
+            webhook = CalcomWebhook.model_validate(json.loads(body))
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(422, f"Invalid webhook: {exc}") from None
+        bookings: BookingService = request.app.state.bookings
+        update = bookings.apply(webhook)
+        if update is not None and update.confirmation:
+            responder: LeadResponder = request.app.state.responder
+            responder.schedule_notify(update.lead_id, update.confirmation)
         return Accepted()
 
     return app

@@ -90,6 +90,8 @@ class Lead(Base):
     ai_paused: Mapped[bool] = mapped_column(default=False)
     """True when a person has taken over the conversation."""
     opted_out_at: Mapped[datetime | None] = mapped_column(default=None)
+    appointment_at: Mapped[datetime | None] = mapped_column(default=None)
+    booking_uid: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     crm_contact_id: Mapped[str | None] = mapped_column(String(64), default=None)
 
     messages: Mapped[list[LeadMessage]] = relationship(

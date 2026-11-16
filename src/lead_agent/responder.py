@@ -80,6 +80,26 @@ class LeadResponder:
         """Continue the conversation after an inbound message was saved."""
         return self._executor.submit(self._safely, self.continue_conversation, lead_id)
 
+    def schedule_notify(self, lead_id: str, text: str) -> Future[None]:
+        """Send a message that isn't part of the conversation, such as a booking confirmation."""
+        return self._executor.submit(self._safely, self.notify, lead_id, text)
+
+    def notify(self, lead_id: str, text: str) -> None:
+        with self._sessions() as session:
+            lead = session.get_one(Lead, lead_id)
+            if lead.status == LeadStatus.OPTED_OUT or not lead.consent:
+                return
+            recipient = _recipient(lead)
+        self._send(recipient, text, lead_id, record=True)
+
+    @property
+    def profile(self) -> BusinessProfile:
+        return self._profile
+
+    @property
+    def sessions(self) -> sessionmaker[Session]:
+        return self._sessions
+
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True)
 
@@ -132,7 +152,7 @@ class LeadResponder:
 
         # Phase 3: decide and save.
         assessment = assess(self._profile, turn.answers)
-        text = self._final_text(snapshot.name, turn, assessment.outcome, assessment.reasons)
+        text = self._final_text(snapshot.recipient, turn, assessment.outcome, assessment.reasons)
         with self._sessions.begin() as session:
             lead = session.get_one(Lead, lead_id)
             lead.answers = turn.answers
@@ -167,8 +187,10 @@ class LeadResponder:
 
     # --- Internals -------------------------------------------------------------
 
-    def _final_text(self, name: str, turn: AgentTurn, outcome: Outcome, reasons: list[str]) -> str:
-        first_name = name.split()[0] if name.strip() else "there"
+    def _final_text(
+        self, recipient: Recipient, turn: AgentTurn, outcome: Outcome, reasons: list[str]
+    ) -> str:
+        first_name = recipient.name.split()[0] if recipient.name.strip() else "there"
         if outcome is Outcome.NOT_A_FIT:
             reason = reasons[0] if reasons else "this isn't a fit for the services we offer"
             return (
@@ -177,13 +199,14 @@ class LeadResponder:
             )
         text = turn.text or FALLBACK_REPLY
         if outcome in {Outcome.QUALIFIED, Outcome.NURTURE} and turn.handoff is None:
-            if self._profile.booking_url:
+            link = self._profile.booking_link(recipient.lead_id, recipient.name, recipient.email)
+            if link:
                 lead_in = (
                     "You can pick a time for your free assessment here"
                     if outcome is Outcome.QUALIFIED
                     else "Whenever you're ready, you can book a free assessment here"
                 )
-                text = f"{text}\n\n{lead_in}: {self._profile.booking_url}"
+                text = f"{text}\n\n{lead_in}: {link}"
             elif outcome is Outcome.QUALIFIED:
                 text = f"{text}\n\nA specialist will reach out shortly to schedule your assessment."
         return text
