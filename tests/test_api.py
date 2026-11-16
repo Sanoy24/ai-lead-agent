@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -239,3 +240,33 @@ def test_cal_ping_and_unknown_bookings_are_accepted_quietly(
         for body in (ping, cal_event("unknown-lead")):
             assert post_booking(client, body, cal_signature(body)) == 200
     assert responder.notifications == []
+
+
+# --- Frontend ----------------------------------------------------------------------
+
+
+def test_built_frontend_is_served_with_client_side_routes(
+    tmp_path: Path, service: LeadService, responder: RecordingResponder
+) -> None:
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<div id=root></div>")
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)")
+    (tmp_path / "favicon.svg").write_text("<svg/>")
+    app = create_app(Settings(), service, cast(LeadResponder, responder), frontend_dir=tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/").text == "<div id=root></div>"
+        assert client.get("/admin/leads/abc").text == "<div id=root></div>"
+        assert client.get("/assets/app.js").text == "console.log(1)"
+        assert client.get("/favicon.svg").status_code == 200
+        assert client.get("/api/nope").status_code == 404
+        assert client.get("/../pyproject.toml").text == "<div id=root></div>"
+
+
+def test_missing_frontend_build_explains_how_to_build(
+    tmp_path: Path, service: LeadService, responder: RecordingResponder
+) -> None:
+    app = create_app(Settings(), service, cast(LeadResponder, responder), frontend_dir=tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/admin")
+    assert response.status_code == 404
+    assert "npm --prefix frontend" in response.text

@@ -11,9 +11,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
+from importlib import resources
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from lead_agent import __version__
@@ -41,6 +45,7 @@ from lead_agent.responder import LeadResponder
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FRONTEND_DIR = Path(str(resources.files("lead_agent").joinpath("web", "dist")))
 SIGNATURE_HEADER = "X-Signature-256"
 CALCOM_SIGNATURE_HEADER = "X-Cal-Signature-256"
 MAX_WEBHOOK_BYTES = 64 * 1024
@@ -164,6 +169,7 @@ def create_app(
     service: LeadService | None = None,
     responder: LeadResponder | None = None,
     bookings: BookingService | None = None,
+    frontend_dir: Path = DEFAULT_FRONTEND_DIR,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -303,7 +309,29 @@ def create_app(
             responder.schedule_notify(update.lead_id, update.confirmation)
         return Accepted()
 
+    _mount_frontend(app, frontend_dir)
     return app
+
+
+def _mount_frontend(app: FastAPI, frontend_dir: Path) -> None:
+    """Serve the built React app (landing page and dashboard), with client-side routing."""
+    index = frontend_dir / "index.html"
+    if (frontend_dir / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=frontend_dir / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> Response:
+        if path.startswith("api/"):
+            raise HTTPException(404)
+        candidate = (frontend_dir / path).resolve()
+        if path and candidate.is_file() and candidate.is_relative_to(frontend_dir.resolve()):
+            return FileResponse(candidate)
+        if index.is_file():
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
+        return PlainTextResponse(
+            "Frontend not built. Run: npm --prefix frontend ci && npm --prefix frontend run build",
+            404,
+        )
 
 
 def sign(body: bytes, secret: str) -> str:

@@ -27,6 +27,28 @@ The language model and plain code each do what they're good at:
 
 Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
 
+## Dashboard
+
+Set `ADMIN_PASSWORD` and sign in at `/admin` to see:
+
+- **Overview**: the median time to first reply (the speed-to-lead number), the share of leads answered within a minute, new leads, bookings, a leads-per-day chart, and the pipeline by status and source.
+- **Leads**: every enquiry, searchable and filterable by status, with each lead's first-reply time.
+- **Lead detail**: the full conversation across email and Telegram, the recorded answers and score, upcoming follow-ups, the consent wording, and an activity log. **Take over** pauses the AI so a person can reply from the dashboard; **Hand back to AI** resumes it.
+
+The same server also hosts a demo landing page for the fictional business at `/`, with the lead form the agent replies to.
+
+## Running it locally
+
+```bash
+uv sync
+npm --prefix frontend ci && npm --prefix frontend run build
+cp .env.example .env   # then set ADMIN_PASSWORD and the LLM settings
+uv run python -m lead_agent.demo.seed   # optional: 60 realistic demo leads
+uv run lead-agent
+```
+
+Open http://127.0.0.1:8001 for the demo site and http://127.0.0.1:8001/admin for the dashboard. For frontend development, run `npm --prefix frontend run dev`; it proxies the API to port 8001.
+
 ## Follow-ups
 
 When a lead stops replying, the agent follows up on the schedule in the business profile (by default 1, 3 and 7 days after its last message). Each follow-up is short, re-asks the open question or offers the booking link again, and the last one says it's the last. Follow-ups are never sent during quiet hours (8 pm to 9 am by default) in the lead's time zone, and a reply restarts the schedule. Booked, opted-out, lost and taken-over leads are never followed up. First replies aren't held for quiet hours, because the lead has just written to you.
