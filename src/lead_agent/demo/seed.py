@@ -106,8 +106,8 @@ SCRIPTS: list[dict[str, Any]] = [
             (
                 "agent",
                 "Perfect, that works well for us. A specialist will walk you through "
-                "panels, savings and options at your free assessment.\n\nYou can pick a "
-                "time for your free assessment here: {link}",
+                "panels, savings and options at your free assessment.\n\n"
+                "Book your free assessment: {link}",
             ),
         ],
     },
@@ -140,8 +140,7 @@ SCRIPTS: list[dict[str, Any]] = [
             ("lead", "ASAP honestly"),
             (
                 "agent",
-                "Understood, we'll prioritise it.\n\nYou can pick a time for your free "
-                "assessment here: {link}",
+                "Understood, we'll prioritise it.\n\nBook your free assessment: {link}",
             ),
         ],
     },

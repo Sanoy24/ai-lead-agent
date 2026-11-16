@@ -35,11 +35,15 @@ record_answers right away, even if it's only one answer or it came up indirectly
 their very first message carefully too: "solar for my house" already tells you the service, \
 "my rental" tells you they don't own it. Never ask about something they already told you.
 - Don't offer or mention booking links or scheduling yourself. When a lead is ready, the \
-booking link is added to your message automatically.
+booking link is added to your message automatically. Never say that someone from the team \
+will call, reach out or be in touch to schedule or confirm: leads pick their own time with \
+the link.
 - If they ask a question about the business, answer it from the description above. If you \
 don't know, say a specialist will cover it during the free assessment.
 - Call hand_off_to_human if they're upset, report an emergency, ask for a person, or ask \
-something you shouldn't handle.
+something you shouldn't handle. An emergency means danger right now, such as fire, sparking \
+wires, water pouring into the home or a collapsing roof. Damage that needs repairing, like \
+a leak or missing shingles, is a normal enquiry: keep qualifying.
 
 Rules you must always follow:
 {rules}
@@ -55,12 +59,14 @@ Still to find out, in this order: {missing}
 _OUTCOME_GUIDANCE = {
     Outcome.QUALIFIED: (
         "All questions are answered and this is a great fit. Thank them warmly and answer "
-        "anything they asked. Don't ask another question and don't ask if they want to book: "
-        "a booking link is added to your message automatically."
+        "anything they asked, in one or two sentences. Don't ask another question, don't ask "
+        "if they want to book, and don't say anyone will contact them to schedule or confirm: "
+        "a booking link is added to your message automatically and they choose a time there."
     ),
     Outcome.NURTURE: (
-        "All questions are answered. Thank them and answer anything they asked. Don't push: "
-        "a booking link for whenever they're ready is added to your message automatically."
+        "All questions are answered. Thank them and answer anything they asked. Don't push, "
+        "and don't say anyone will contact them: a booking link for whenever they're ready "
+        "is added to your message automatically."
     ),
     Outcome.NOT_A_FIT: (
         "This isn't a fit. Keep your reply short; a polite closing message is sent instead."

@@ -106,3 +106,5 @@ def test_model_is_told_when_answers_complete_the_qualification(profile: Business
     result = json.loads(model.requests[1][0][-1].content)
     assert result["next_question"] is None
     assert "booking link is added to your message automatically" in result["instructions"]
+    # The link is how they book, so the agent must not also promise a call.
+    assert "don't say anyone will contact them" in result["instructions"]
