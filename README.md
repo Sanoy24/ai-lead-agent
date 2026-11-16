@@ -13,7 +13,7 @@ Most leads go to whichever business answers first. A form filled in at 9 pm usua
 
 **For your leads**
 
-- **A reply in under a minute**, by email or Telegram, in your business's voice. Leads come from your website form, any webhook (Facebook Lead Ads, Typeform, Zapier and similar) or your Telegram bot.
+- **A reply in under a minute**, by text message, email or Telegram, in your business's voice. Leads come from your website form, any webhook (Facebook Lead Ads, Typeform, Zapier and similar), a text to your business number, or your Telegram bot. Replies go back on the channel the lead last used.
 - **A real conversation, not a form.** The agent answers questions about your business, asks one qualifying question at a time, and never asks for something the lead already told it.
 - **Booking when they're ready.** Qualified leads get your booking link, prefilled with their name and email. Leads who aren't ready get it as a no-pressure option, and poor fits get a polite close.
 - **Follow-ups that stop at the right time.** If a lead goes quiet, a short nudge goes out after 1, 3 and 7 days, never during quiet hours in their time zone. A reply, a booking or "STOP" ends them.
@@ -61,7 +61,7 @@ The language model and plain code each do what they're good at:
 | The agent promises prices or dates | Your rules are part of every prompt, and the booking link is added by code, not by the model. |
 | Prompt injection ("ignore your instructions...") | Lead messages are treated as data. The agent's only tools are recording answers (which code then scores) and asking for a person, so it can't book, cancel or quote anything. |
 | The model is down | A new lead still gets a holding reply within seconds, and the AI pauses so a person can pick the conversation up. |
-| Forged webhooks | Lead and Cal.com webhooks must be signed with HMAC-SHA256. Without a secret, the endpoints are off. |
+| Forged webhooks | Lead and Cal.com webhooks must be signed with HMAC-SHA256, and SMS webhooks must carry Twilio's signature. Without a secret, each endpoint is off. |
 | The dashboard is attacked | Password sign-in sets a signed, HttpOnly, SameSite=Strict cookie, and login attempts are rate limited. |
 
 ## Channels and integrations
@@ -71,6 +71,7 @@ The language model and plain code each do what they're good at:
 | **Website form** | Nothing (built in) | `POST /api/leads`, with consent and a spam trap. The demo site at `/` shows it in use. |
 | **Webhooks** | `WEBHOOK_SECRET` | Signed `POST /api/webhooks/leads` from ads, form builders or Zapier. |
 | **Email** | `SMTP_*`, `EMAIL_FROM`, optionally `IMAP_HOST` | One email thread per lead. Replies are read every minute and continue the conversation; automatic replies are ignored. A free Gmail account with an app password works. |
+| **SMS (Twilio)** | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Leads with a phone number get texts. A text to your number from someone new starts a lead. Incoming texts are verified with Twilio's signature; the first text includes "Reply STOP to opt out". |
 | **Telegram** | `TELEGRAM_BOT_TOKEN` | Anyone who messages your bot becomes a lead. `/stop` opts out. Long polling, so no public URL is needed. |
 | **Cal.com** | `CALCOM_WEBHOOK_SECRET` | Bookings, reschedules and cancellations update the lead, stop follow-ups and confirm the time in the lead's time zone. |
 | **HubSpot** | `HUBSPOT_ACCESS_TOKEN` | Leads become contacts (matched by email), lead status follows the pipeline, and key moments become notes. Works with the free CRM. |

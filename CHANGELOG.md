@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Qualifying agent that replies to new leads and records their answers through a tool generated from the profile.
 - Deterministic scoring and routing: qualified leads get the booking link, weak ones are nurtured, poor fits get a polite close.
 - Opt-outs (STOP, unsubscribe) are handled before the model sees the message and are permanent.
+- SMS through Twilio: leads with a phone number get texts, a text from a new number starts a lead, and incoming texts are verified with Twilio's signature. The first text carries an opt-out line.
+- Replies go back on the channel the lead last used (SMS, email or Telegram).
+- Form and webhook phone numbers written with parentheses, such as (303) 555-0100, are now accepted.
 - README rewritten for clients and developers, with screenshots of the dashboard and demo site.
 - HubSpot sync: leads become contacts (matched by email, no duplicates) with their lead status kept in step with the pipeline, and key moments (new enquiry, status changes, bookings, handoffs, opt-outs) added as notes. Runs in the background and catches up after outages.
 - Columns added in new versions are added to existing databases automatically.
