@@ -17,6 +17,16 @@ Most leads go to whichever business answers first. A form filled in at 9 pm usua
 - **Follows up automatically** when a lead goes quiet, and stops the moment they reply, book or opt out.
 - **Syncs to your CRM** (HubSpot) and shows your pipeline, response times and every conversation in a dashboard, where a person can take over at any time.
 
+## How qualification works
+
+The language model and plain code each do what they're good at:
+
+- **The model talks.** It writes warm, short replies, answers questions about the business, and records the lead's answers through a `record_answers` tool generated from the business profile.
+- **Code decides.** A scoring module turns the recorded answers into a score and an outcome using rules from the business profile: keep qualifying, **qualified** (booking link added automatically), **nurture** (all answers in but not ready), or **not a fit** (polite close). The outcome never depends on the model's judgement, so it's predictable and testable.
+- **Opt-outs bypass the model entirely.** "STOP" or "unsubscribe" is caught before the model sees the message, and the lead is never contacted again.
+
+Everything business-specific lives in one TOML file: the description, rules the agent must follow (such as "never quote prices"), the questions, and how answers are scored. See [the demo profile](src/lead_agent/demo/business.toml).
+
 ## Design principles
 
 - **Consent first.** It only contacts people who asked to be contacted, and opt-outs are permanent.

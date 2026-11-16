@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from lead_agent.api.app import SIGNATURE_HEADER, sign
 from lead_agent.config import Settings
 from lead_agent.db import Lead
 from lead_agent.leads import LeadService
+from lead_agent.responder import LeadResponder
 
 SECRET = "whsec-test-secret"
 
@@ -27,11 +28,33 @@ FORM: dict[str, Any] = {
 }
 
 
+class RecordingResponder:
+    """Stands in for the responder: records which leads would get a reply."""
+
+    def __init__(self) -> None:
+        self.first_replies: list[str] = []
+        self.replies: list[str] = []
+
+    def schedule_first_reply(self, lead_id: str) -> None:
+        self.first_replies.append(lead_id)
+
+    def schedule_reply(self, lead_id: str) -> None:
+        self.replies.append(lead_id)
+
+    def shutdown(self) -> None:
+        pass
+
+
 @pytest.fixture
-def make_client(service: LeadService) -> ClientFactory:
+def responder() -> RecordingResponder:
+    return RecordingResponder()
+
+
+@pytest.fixture
+def make_client(service: LeadService, responder: RecordingResponder) -> ClientFactory:
     def factory(**overrides: object) -> TestClient:
         settings = Settings.model_validate({"webhook_secret": SecretStr(SECRET), **overrides})
-        return TestClient(create_app(settings, service))
+        return TestClient(create_app(settings, service, cast(LeadResponder, responder)))
 
     return factory
 
@@ -44,14 +67,17 @@ def lead_count(sessions: sessionmaker[Session]) -> int:
 # --- Website form --------------------------------------------------------------
 
 
-def test_form_submission_creates_a_lead(
-    make_client: ClientFactory, sessions: sessionmaker[Session]
+def test_form_submission_creates_a_lead_and_schedules_a_reply(
+    make_client: ClientFactory, sessions: sessionmaker[Session], responder: RecordingResponder
 ) -> None:
     with make_client() as client:
         response = client.post("/api/leads", json=FORM)
+        client.post("/api/leads", json={**FORM, "message": "Any update?"})
     assert response.status_code == 202
     assert response.json() == {"status": "received"}
     assert lead_count(sessions) == 1
+    assert len(responder.first_replies) == 1
+    assert responder.replies == responder.first_replies
 
 
 def test_form_requires_consent(make_client: ClientFactory) -> None:
@@ -62,12 +88,13 @@ def test_form_requires_consent(make_client: ClientFactory) -> None:
 
 
 def test_spam_trap_submissions_are_dropped_silently(
-    make_client: ClientFactory, sessions: sessionmaker[Session]
+    make_client: ClientFactory, sessions: sessionmaker[Session], responder: RecordingResponder
 ) -> None:
     with make_client() as client:
         response = client.post("/api/leads", json={**FORM, "website": "http://spam.example"})
     assert response.status_code == 202
     assert lead_count(sessions) == 0
+    assert responder.first_replies == []
 
 
 def test_form_is_rate_limited(make_client: ClientFactory) -> None:

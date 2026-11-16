@@ -15,10 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
 from lead_agent import __version__
+from lead_agent.agent import QualifyingAgent
 from lead_agent.api.ratelimit import RateLimiter
-from lead_agent.config import Settings, get_settings
+from lead_agent.config import Settings, fallback_models, get_settings
 from lead_agent.db import LeadSource, make_engine, make_session_factory
-from lead_agent.leads import LeadIntake, LeadService
+from lead_agent.leads import IntakeResult, LeadIntake, LeadService
+from lead_agent.llm import OpenAICompatibleModel
+from lead_agent.profile import load_profile
+from lead_agent.responder import LeadResponder
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +47,43 @@ class Accepted(BaseModel):
     status: str = "received"
 
 
-def build_lead_service(settings: Settings) -> LeadService:
+def build_services(settings: Settings) -> tuple[LeadService, LeadResponder]:
     sessions = make_session_factory(make_engine(settings.database_url))
-    return LeadService(
+    leads = LeadService(
         sessions,
         consent_text=settings.consent_text,
         duplicate_window=timedelta(hours=settings.duplicate_window_hours),
     )
+    profile = load_profile(settings.business_profile)
+    model = OpenAICompatibleModel(
+        settings.llm_model,
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value() if settings.llm_api_key else None,
+        reasoning_effort=settings.llm_reasoning_effort or None,
+        fallback_models=fallback_models(settings),
+        timeout=settings.llm_timeout_seconds,
+    )
+    responder = LeadResponder(sessions, QualifyingAgent(model, profile), profile)
+    return leads, responder
 
 
-def create_app(settings: Settings | None = None, service: LeadService | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    service: LeadService | None = None,
+    responder: LeadResponder | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.leads = service or build_lead_service(settings)
-        yield
+        if service is None or responder is None:
+            built_leads, built_responder = build_services(settings)
+        app.state.leads = service or built_leads
+        app.state.responder = responder or built_responder
+        try:
+            yield
+        finally:
+            app.state.responder.shutdown()
 
     app = FastAPI(
         title="ai-lead-agent",
@@ -82,6 +107,13 @@ def create_app(settings: Settings | None = None, service: LeadService | None = N
         svc: LeadService = request.app.state.leads
         return svc
 
+    def respond(request: Request, result: IntakeResult) -> None:
+        responder: LeadResponder = request.app.state.responder
+        if result.created:
+            responder.schedule_first_reply(result.lead_id)
+        else:
+            responder.schedule_reply(result.lead_id)
+
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
@@ -102,7 +134,7 @@ def create_app(settings: Settings | None = None, service: LeadService | None = N
             logger.info("Dropped a form submission that filled the spam trap")
             return Accepted()
         intake = LeadIntake.model_validate(body.model_dump(exclude={"website"}))
-        leads(request).receive(intake, LeadSource.FORM)
+        respond(request, leads(request).receive(intake, LeadSource.FORM))
         return Accepted()
 
     @app.post("/api/webhooks/leads", status_code=202, tags=["intake"])
@@ -126,7 +158,8 @@ def create_app(settings: Settings | None = None, service: LeadService | None = N
         except (ValueError, ValidationError) as exc:
             raise HTTPException(422, f"Invalid lead: {exc}") from None
         intake = LeadIntake.model_validate(payload.model_dump(exclude={"source_detail"}))
-        leads(request).receive(intake, LeadSource.WEBHOOK, payload.source_detail)
+        result = leads(request).receive(intake, LeadSource.WEBHOOK, payload.source_detail)
+        respond(request, result)
         return Accepted()
 
     return app
