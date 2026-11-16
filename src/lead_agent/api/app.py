@@ -38,7 +38,9 @@ from lead_agent.channels.email import (
 from lead_agent.channels.sms import SmsChannel, TwilioClient, to_e164, valid_twilio_signature
 from lead_agent.channels.telegram import TelegramBot, TelegramChannel, TelegramClient
 from lead_agent.config import Settings, fallback_models, get_settings
+from lead_agent.crm.gohighlevel import GoHighLevelClient, GoHighLevelSync, webhook_lead_fields
 from lead_agent.crm.hubspot import HubSpotClient, HubSpotSync
+from lead_agent.crm.sync import CrmSync
 from lead_agent.db import LeadSource, make_engine, make_session_factory
 from lead_agent.followups import FollowUpScheduler
 from lead_agent.leads import IntakeResult, LeadIntake, LeadService
@@ -155,12 +157,22 @@ def build_services(settings: Settings) -> Services:
         services.workers["telegram"] = bot.run_polling
         services.cleanup.append(telegram_client.close)
 
-    if settings.hubspot_access_token is not None:
+    crm: CrmSync | None = None
+    if settings.gohighlevel_api_token is not None and settings.gohighlevel_location_id:
+        if settings.hubspot_access_token is not None:
+            logger.warning("Both GoHighLevel and HubSpot are set; syncing to GoHighLevel only")
+        ghl = GoHighLevelClient(
+            settings.gohighlevel_api_token.get_secret_value(), settings.gohighlevel_location_id
+        )
+        crm = GoHighLevelSync(sessions, ghl, dashboard_url=settings.public_url)
+        services.cleanup.append(ghl.close)
+    elif settings.hubspot_access_token is not None:
         hubspot = HubSpotClient(settings.hubspot_access_token.get_secret_value())
         crm = HubSpotSync(sessions, hubspot, dashboard_url=settings.public_url)
-        crm_interval = settings.hubspot_sync_seconds
-        services.workers["hubspot"] = lambda stop: crm.run_polling(stop, crm_interval)
         services.cleanup.append(hubspot.close)
+    if crm is not None:
+        crm_sync, crm_interval = crm, settings.crm_sync_seconds
+        services.workers["crm"] = lambda stop: crm_sync.run_polling(stop, crm_interval)
 
     if settings.imap_host:
         mailbox = ImapMailbox(
@@ -344,6 +356,41 @@ def create_app(
                 responder_service.schedule_inbound(lead.id, text, "sms")
         # An empty TwiML response: replies are sent separately through the API.
         return Response("<Response></Response>", media_type="text/xml")
+
+    @app.post("/api/webhooks/gohighlevel", status_code=202, tags=["intake"])
+    async def receive_gohighlevel(request: Request) -> Accepted:
+        """New leads from a GoHighLevel workflow Webhook action.
+
+        Authenticate with the ``X-Webhook-Secret`` header (or a ``secret`` query
+        parameter) set to ``GOHIGHLEVEL_WEBHOOK_SECRET``.
+        """
+        if settings.gohighlevel_webhook_secret is None:
+            raise HTTPException(404)
+        given = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret")
+        expected = settings.gohighlevel_webhook_secret.get_secret_value()
+        if not given or not hmac.compare_digest(given.encode(), expected.encode()):
+            raise HTTPException(401, "Invalid or missing secret.")
+        body = await request.body()
+        if len(body) > MAX_WEBHOOK_BYTES:
+            raise HTTPException(413, "Payload too large.")
+        try:
+            payload = json.loads(body)
+            fields = webhook_lead_fields(payload if isinstance(payload, dict) else {})
+            contact_id = fields.pop("contact_id")
+            intake = LeadIntake.model_validate({**fields, "consent": True})
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(422, f"Invalid lead: {exc}") from None
+        service_: LeadService = leads(request)
+        result = service_.receive(
+            intake,
+            LeadSource.WEBHOOK,
+            "gohighlevel",
+            consent_text=settings.gohighlevel_consent_text,
+        )
+        if contact_id and result.created:
+            service_.link_crm_contact(result.lead_id, contact_id)
+        respond(request, result)
+        return Accepted()
 
     @app.post("/api/webhooks/calcom", tags=["booking"])
     async def receive_booking(request: Request) -> Accepted:

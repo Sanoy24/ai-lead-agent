@@ -24,7 +24,7 @@ Most leads go to whichever business answers first. A form filled in at 9 pm usua
 - **Every conversation in one place**, across email and Telegram, with the recorded answers, score, appointment, follow-up schedule and an activity log.
 - **Take over at any time.** One click pauses the AI so a person can reply from the dashboard; hand it back when you're done. The agent also hands over by itself when someone is upset, reports an emergency or asks for a person.
 - **Bring old leads back.** Upload a CSV of past leads or customers and the agent sends each a short, personal opener (outside quiet hours). Replies continue as normal conversations, and the Campaigns page shows who replied and booked. Anyone who ever opted out is skipped automatically.
-- **Your CRM stays current.** Leads become HubSpot contacts with their lead status kept in step, and key moments are added as notes.
+- **Your CRM stays current.** Leads become HubSpot or GoHighLevel contacts with their stage kept in step, and key moments are added as notes.
 
 <table>
   <tr>
@@ -76,6 +76,7 @@ The language model and plain code each do what they're good at:
 | **Telegram** | `TELEGRAM_BOT_TOKEN` | Anyone who messages your bot becomes a lead. `/stop` opts out. Long polling, so no public URL is needed. |
 | **Cal.com** | `CALCOM_WEBHOOK_SECRET` | Bookings, reschedules and cancellations update the lead, stop follow-ups and confirm the time in the lead's time zone. |
 | **HubSpot** | `HUBSPOT_ACCESS_TOKEN` | Leads become contacts (matched by email), lead status follows the pipeline, and key moments become notes. Works with the free CRM. |
+| **GoHighLevel** | `GOHIGHLEVEL_API_TOKEN`, `GOHIGHLEVEL_LOCATION_ID`, optionally `GOHIGHLEVEL_WEBHOOK_SECRET` | Leads become contacts in your sub-account, tagged with their stage (`ai-lead: qualified`, `ai-lead: booked` and so on) so your workflows can react, with key moments as notes. A workflow Webhook action can also send new GoHighLevel leads to the agent, so they get a reply within a minute. Your own tags are never touched. |
 | **Language model** | `LLM_*` | Any OpenAI-compatible API: a local Ollama model, or OpenRouter's free models. |
 
 Everything is optional except the language model. Without email settings, messages to email leads are written to the log, so you can try it all locally. See [.env.example](.env.example) for every setting.

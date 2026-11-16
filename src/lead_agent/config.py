@@ -97,7 +97,25 @@ class Settings(BaseSettings):
     hubspot_portal_id: str | None = Field(
         default=None, description="Your HubSpot account id, for links from the dashboard."
     )
-    hubspot_sync_seconds: float = 30.0
+
+    # GoHighLevel (optional): sync leads to contacts, and take leads in from workflows.
+    # If both GoHighLevel and HubSpot are set, leads sync to GoHighLevel only.
+    gohighlevel_api_token: SecretStr | None = Field(
+        default=None, description="Private Integration token with contacts read and write scopes."
+    )
+    gohighlevel_location_id: str | None = Field(
+        default=None, description="The sub-account (location) to sync contacts to."
+    )
+    gohighlevel_webhook_secret: SecretStr | None = Field(
+        default=None,
+        description="Shared secret for /api/webhooks/gohighlevel, sent by the workflow "
+        "Webhook action as the X-Webhook-Secret header or ?secret= query parameter.",
+    )
+    gohighlevel_consent_text: str = Field(
+        default="Captured in GoHighLevel by the business, which collected consent to contact them.",
+        description="Stored as the consent wording for leads that arrive from GoHighLevel.",
+    )
+    crm_sync_seconds: float = 30.0
     public_url: str | None = Field(
         default=None,
         description="Where this app is reachable, e.g. https://leads.example.com. Used for "

@@ -7,6 +7,7 @@ for an HttpOnly, SameSite=Strict session cookie.
 import secrets
 import statistics
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -24,6 +25,7 @@ from lead_agent.campaigns import (
     ReactivationService,
 )
 from lead_agent.config import Settings
+from lead_agent.crm.gohighlevel import contact_url as gohighlevel_contact_url
 from lead_agent.db import Direction, Lead, LeadEvent, LeadMessage, LeadStatus, utcnow
 from lead_agent.responder import LeadResponder, OptedOutError
 
@@ -141,6 +143,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
         else secrets.token_bytes(32)
     )
     signer = SessionSigner(secret)
+    crm_link = _crm_link(settings)
     login_limiter = RateLimiter(5)
 
     def admin_enabled() -> str:
@@ -290,7 +293,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
     @private.get("/leads/{lead_id}")
     def lead_detail(lead_id: str, request: Request) -> LeadDetail:
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
+            return _detail(_get(db, lead_id), crm_link)
 
     @private.post("/leads/{lead_id}/takeover")
     def take_over(lead_id: str, request: Request) -> LeadDetail:
@@ -316,7 +319,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
         if not delivered:
             raise HTTPException(502, "The message was saved but couldn't be delivered.")
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
+            return _detail(_get(db, lead_id), crm_link)
 
     @private.post("/leads/{lead_id}/status")
     def change_status(lead_id: str, body: StatusChange, request: Request) -> LeadDetail:
@@ -336,7 +339,7 @@ def build_admin_router(settings: Settings) -> APIRouter:
                 if body.status in _CLOSED:
                     lead.next_follow_up_at = None
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
+            return _detail(_get(db, lead_id), crm_link)
 
     @private.get("/campaigns")
     def campaigns(request: Request) -> list[CampaignStats]:
@@ -360,12 +363,25 @@ def build_admin_router(settings: Settings) -> APIRouter:
             _get(db, lead_id)
         responder(request).set_paused(lead_id, paused)
         with sessions(request)() as db:
-            return _detail(_get(db, lead_id), settings.hubspot_portal_id)
+            return _detail(_get(db, lead_id), crm_link)
 
     router = APIRouter()
     router.include_router(public)
     router.include_router(private)
     return router
+
+
+def _crm_link(settings: Settings) -> Callable[[str], str | None] | None:
+    """How to link a lead CRM contact, for whichever CRM is in use."""
+    location = settings.gohighlevel_location_id
+    if settings.gohighlevel_api_token is not None and location:
+        return lambda contact_id: gohighlevel_contact_url(location, contact_id)
+    portal = settings.hubspot_portal_id
+    if settings.hubspot_access_token is not None and portal:
+        return lambda contact_id: (
+            f"https://app.hubspot.com/contacts/{portal}/record/0-1/{contact_id}"
+        )
+    return None
 
 
 def _get(db: Session, lead_id: str) -> Lead:
@@ -419,12 +435,8 @@ def _summary(lead: Lead) -> LeadSummary:
     )
 
 
-def _detail(lead: Lead, portal_id: str | None = None) -> LeadDetail:
-    crm_url = (
-        f"https://app.hubspot.com/contacts/{portal_id}/record/0-1/{lead.crm_contact_id}"
-        if portal_id and lead.crm_contact_id
-        else None
-    )
+def _detail(lead: Lead, crm_link: Callable[[str], str | None] | None = None) -> LeadDetail:
+    crm_url = crm_link(lead.crm_contact_id) if crm_link and lead.crm_contact_id else None
     return LeadDetail(
         **_summary(lead).model_dump(),
         crm_url=crm_url,

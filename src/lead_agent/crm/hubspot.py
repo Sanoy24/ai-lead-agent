@@ -4,25 +4,21 @@ Works with the free HubSpot CRM. Create a private app (Settings > Integrations >
 Private apps) with the ``crm.objects.contacts.read`` and
 ``crm.objects.contacts.write`` scopes, and set ``HUBSPOT_ACCESS_TOKEN``.
 
-Sync runs in the background and never blocks a reply to a lead. Changed leads
-are picked up on the next pass, so a HubSpot outage only delays the sync.
+The sync engine itself lives in ``lead_agent.crm.sync``.
 """
 
 from __future__ import annotations
 
-import html
 import logging
-import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import or_, select, update
-from sqlalchemy.orm import Session, selectinload, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
-from lead_agent.db import Lead, LeadEvent, LeadStatus, utcnow
+from lead_agent.crm.sync import CrmContact, CrmError, CrmSync
+from lead_agent.db import LeadStatus, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +37,8 @@ LEAD_STATUS = {
 }
 """Our pipeline mapped onto HubSpot's default "Lead status" property."""
 
-NOTE_EVENTS = {
-    "lead.created",
-    "lead.status_changed",
-    "lead.booked",
-    "lead.rescheduled",
-    "lead.booking_cancelled",
-    "lead.handed_off",
-    "lead.opted_out",
-}
 
-
-class HubSpotError(RuntimeError):
+class HubSpotError(CrmError):
     """Raised when the HubSpot API returns an error."""
 
 
@@ -129,18 +115,38 @@ class HubSpotClient:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _Snapshot:
-    id: str
-    contact_id: str | None
-    email: str | None
-    properties: dict[str, str]
-    notes: list[tuple[int, str, datetime]]
-    last_event_id: int
+class HubSpotConnector:
+    """Creates or updates HubSpot contacts and adds notes to them."""
+
+    name = "HubSpot"
+
+    def __init__(self, client: HubSpotClient) -> None:
+        self._client = client
+
+    def push(self, contact: CrmContact) -> str:
+        properties = {
+            "firstname": contact.first_name,
+            "lastname": contact.last_name,
+            "hs_lead_status": LEAD_STATUS.get(contact.status, "OPEN"),
+        }
+        if contact.email:
+            properties["email"] = contact.email
+        if contact.phone:
+            properties["phone"] = contact.phone
+        contact_id = contact.contact_id
+        if contact_id is None and contact.email:
+            contact_id = self._client.find_contact(contact.email)
+        if contact_id is None:
+            contact_id = self._client.create_contact(properties)
+        else:
+            self._client.update_contact(contact_id, properties)
+        for note in contact.notes:
+            self._client.add_note(contact_id, note.html, note.created_at)
+        return contact_id
 
 
-class HubSpotSync:
-    """Pushes new and changed leads to HubSpot. Run ``run_polling`` in a thread."""
+class HubSpotSync(CrmSync):
+    """CRM sync with HubSpot as the connector."""
 
     def __init__(
         self,
@@ -151,121 +157,10 @@ class HubSpotSync:
         batch_size: int = 20,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
-        self._sessions = sessions
-        self._client = client
-        self._dashboard_url = dashboard_url.rstrip("/") if dashboard_url else None
-        self._batch_size = batch_size
-        self._clock = clock
-
-    def sync_once(self) -> int:
-        """Sync leads that are new or changed since their last sync. Returns how many."""
-        started = self._clock()
-        with self._sessions() as session:
-            leads = session.scalars(
-                select(Lead)
-                .where(or_(Lead.crm_synced_at.is_(None), Lead.updated_at > Lead.crm_synced_at))
-                .options(selectinload(Lead.events), selectinload(Lead.messages))
-                .order_by(Lead.updated_at)
-                .limit(self._batch_size)
-            ).all()
-            snapshots = [self._snapshot(lead) for lead in leads]
-
-        synced = 0
-        for snapshot in snapshots:
-            try:
-                contact_id = self._push(snapshot)
-            except HubSpotError as exc:
-                logger.warning("HubSpot sync failed for lead %s: %s", snapshot.id, exc)
-                continue
-            with self._sessions.begin() as session:
-                session.execute(
-                    update(Lead)
-                    .where(Lead.id == snapshot.id)
-                    .values(
-                        crm_contact_id=contact_id,
-                        crm_synced_at=started,
-                        crm_synced_event_id=snapshot.last_event_id,
-                        # Leave updated_at alone, or every sync would look like a change.
-                        updated_at=Lead.updated_at,
-                    )
-                )
-            synced += 1
-        return synced
-
-    def run_polling(self, stop: threading.Event, interval: float = 30.0) -> None:
-        logger.info("HubSpot sync started")
-        while not stop.is_set():
-            try:
-                self.sync_once()
-            except Exception:
-                logger.exception("HubSpot sync run failed")
-            stop.wait(interval)
-        logger.info("HubSpot sync stopped")
-
-    def _push(self, snapshot: _Snapshot) -> str:
-        contact_id = snapshot.contact_id
-        if contact_id is None and snapshot.email:
-            contact_id = self._client.find_contact(snapshot.email)
-        if contact_id is None:
-            contact_id = self._client.create_contact(snapshot.properties)
-        else:
-            self._client.update_contact(contact_id, snapshot.properties)
-        for _, body, at in snapshot.notes:
-            self._client.add_note(contact_id, body, at)
-        return contact_id
-
-    def _snapshot(self, lead: Lead) -> _Snapshot:
-        first, _, last = lead.name.partition(" ")
-        properties = {
-            "firstname": first,
-            "lastname": last,
-            "hs_lead_status": LEAD_STATUS.get(LeadStatus(lead.status), "OPEN"),
-        }
-        if lead.email:
-            properties["email"] = lead.email
-        if lead.phone:
-            properties["phone"] = lead.phone
-        new_events = [e for e in lead.events if e.id > (lead.crm_synced_event_id or 0)]
-        notes = [
-            (event.id, self._note(lead, event), event.created_at)
-            for event in new_events
-            if event.type in NOTE_EVENTS
-        ]
-        last_event_id = max((e.id for e in lead.events), default=lead.crm_synced_event_id or 0)
-        return _Snapshot(lead.id, lead.crm_contact_id, lead.email, properties, notes, last_event_id)
-
-    def _note(self, lead: Lead, event: LeadEvent) -> str:
-        d = event.detail
-        if event.type == "lead.created":
-            first = next((m.content for m in lead.messages), "")
-            lines = [f"<b>New enquiry</b> via {html.escape(str(d.get('source', lead.source)))}"]
-            if lead.service_interest:
-                lines.append(f"Interested in: {html.escape(lead.service_interest)}")
-            if first:
-                lines.append(f"Message: {html.escape(first[:500])}")
-        elif event.type == "lead.status_changed":
-            lines = [f"<b>Status:</b> {html.escape(str(d.get('to', lead.status)))}"]
-            if lead.answers:
-                lines += [
-                    f"{html.escape(k.replace('_', ' '))}: {html.escape(str(v))}"
-                    for k, v in lead.answers.items()
-                ]
-            if lead.score is not None:
-                lines.append(f"Score: {lead.score}")
-        elif event.type == "lead.handed_off":
-            lines = [
-                "<b>The AI agent asked for a person</b>",
-                html.escape(str(d.get("summary") or d.get("reason") or "")),
-            ]
-        elif event.type == "lead.booked":
-            when = lead.appointment_at.isoformat() if lead.appointment_at else "a time"
-            lines = [f"<b>Booked a free assessment</b> for {html.escape(when)} (UTC)"]
-        elif event.type == "lead.opted_out":
-            lines = ["<b>Opted out.</b> Do not contact."]
-        else:
-            lines = [html.escape(event.type.replace("lead.", "").replace("_", " ").capitalize())]
-        if self._dashboard_url:
-            lines.append(
-                f'<a href="{self._dashboard_url}/admin/leads/{lead.id}">Open in ai-lead-agent</a>'
-            )
-        return "<br>".join(line for line in lines if line)
+        super().__init__(
+            sessions,
+            HubSpotConnector(client),
+            dashboard_url=dashboard_url,
+            batch_size=batch_size,
+            clock=clock,
+        )
