@@ -294,7 +294,7 @@ class LeadResponder:
             link = self._profile.booking_link(recipient.lead_id, recipient.name, recipient.email)
             if link:
                 lead_in = (
-                    "You can pick a time for your free assessment here"
+                    "Book your free assessment"
                     if outcome is Outcome.QUALIFIED
                     else "Whenever you're ready, you can book a free assessment here"
                 )
