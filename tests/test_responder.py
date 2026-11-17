@@ -269,6 +269,24 @@ def test_background_scheduling_runs_the_reply(
         ("Great! Pick a time with the link below.", "Great!"),
         ("A booking link is added automatically.", "Thanks so much for sharing all that!"),
         ("Perfect, thanks Dana!", "Perfect, thanks Dana!"),
+        (
+            "Thanks, Yoni! We'll have a specialist reach out to schedule your free on-site "
+            "assessment for the roof repair. We look forward to helping you.",
+            "Thanks, Yoni! We look forward to helping you.",
+        ),
+        (
+            "Great, someone will be in touch to confirm a time.",
+            "Thanks so much for sharing all that!",
+        ),
+        ("Our team will give you a call to set up the visit. Talk soon!", "Talk soon!"),
+        (
+            "Feel free to reach out if you have any questions.",
+            "Feel free to reach out if you have any questions.",
+        ),
+        (
+            "A specialist will cover pricing during the free assessment.",
+            "A specialist will cover pricing during the free assessment.",
+        ),
     ],
 )
 def test_model_talk_about_the_booking_link_is_removed(model_text: str, expected: str) -> None:
