@@ -7,6 +7,8 @@
 
 Most leads go to whichever business answers first. A form filled in at 9 pm usually waits until the next morning, and by then the lead has called a competitor. This agent replies in seconds and keeps the conversation going until the lead is booked or politely closed.
 
+**[▶ Watch the 2-minute demo on YouTube](https://youtu.be/X6X4b2D8GlA)**: a lead messages on Telegram, gets qualified and receives the booking link, then the team takes over and a campaign brings old leads back.
+
 ![Dashboard overview: median first reply of 15 seconds, 82% of leads answered within a minute, and the pipeline by status](docs/screenshots/overview.png)
 
 ## What it does
