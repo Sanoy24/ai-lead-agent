@@ -57,18 +57,32 @@ _FINAL_STATUSES = {LeadStatus.BOOKED, LeadStatus.LOST, LeadStatus.OPTED_OUT}
 _LINK_TALK = re.compile(
     r"\b(booking link|link below|link above|added automatically|automatically added)\b", re.I
 )
+# Promises that the team will contact the lead to set up a time. The lead books
+# with the link instead, so these sentences would contradict it.
+_CONTACT_PROMISE = re.compile(
+    r"\b(reach out|be in touch|get in touch|contact you|call you|give you a call"
+    r"|follow up with you)\b",
+    re.I,
+)
+_SCHEDULING = re.compile(r"\b(schedul\w*|set up|arrange|book\w*|confirm\w*|a time)\b", re.I)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _LINK_TALK_FALLBACK = "Thanks so much for sharing all that!"
 
 
+def _talks_about_link(sentence: str) -> bool:
+    if _LINK_TALK.search(sentence):
+        return True
+    return bool(_CONTACT_PROMISE.search(sentence) and _SCHEDULING.search(sentence))
+
+
 def without_link_talk(text: str) -> str:
-    """Drop sentences where the model talks about the booking link.
+    """Drop sentences where the model talks about the booking link or promises a call.
 
     The link is added by code right after the model's message, and smaller
     models tend to announce it ("the booking link will be added automatically"),
     which reads oddly. Removing those sentences works the same for every model.
     """
-    kept = [s for s in _SENTENCE_END.split(text.strip()) if s and not _LINK_TALK.search(s)]
+    kept = [s for s in _SENTENCE_END.split(text.strip()) if s and not _talks_about_link(s)]
     return " ".join(kept) or _LINK_TALK_FALLBACK
 
 
